@@ -3,13 +3,13 @@ import {
   Upload, FileSpreadsheet, CheckCircle, AlertCircle, Scale, 
   ArrowRight, XCircle, Eye, Landmark, Monitor, Calculator, 
   Filter, Save, ArrowUpDown, ListChecks, SplitSquareHorizontal, 
-  Moon, Sun, Download, Sparkles, Lock, Mail, Key, LogOut, Cloud, History, Crown
+  Moon, Sun, Download, Sparkles, Lock, Mail, Key, LogOut, Cloud, History, Crown, CreditCard, Zap
 } from 'lucide-react';
 
 // === IMPORTAÇÕES DO FIREBASE ===
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { getFirestore, collection, addDoc, getDocs } from "firebase/firestore";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc } from "firebase/firestore";
 
 // === CONFIGURAÇÃO DO FIREBASE (COLE AS SUAS CHAVES AQUI) ===
 let firebaseConfig = {
@@ -55,10 +55,11 @@ export default function App() {
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   
-  // Autenticação e Planos
+  // === AUTENTICAÇÃO E PLANOS ===
   const [user, setUser] = useState(null);
   const [isRealUser, setIsRealUser] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false); // Novo Modal de Preços
   const [authMode, setAuthMode] = useState('register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -66,8 +67,9 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
   
-  // VARIÁVEL DE MONETIZAÇÃO (Falsa por enquanto, depois ligaremos ao Stripe)
-  const [isPremium, setIsPremium] = useState(false); 
+  // ESTADOS DO PRODUTO (Para MVP estamos a guardar no estado/local)
+  const [userPlan, setUserPlan] = useState('free'); // 'free' ou 'premium'
+  const [avulsoCredits, setAvulsoCredits] = useState(0);
 
   // Histórico
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -109,10 +111,6 @@ export default function App() {
     } else {
       setIsXlsxLoaded(true);
     }
-    try {
-      const saved = localStorage.getItem('conciliador_data');
-      if (saved) setHasSavedSession(true);
-    } catch (e) {}
   }, []);
 
   const handleAuthSubmit = async (e) => {
@@ -126,7 +124,8 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       setShowAuthWall(false);
-      setStep(2);
+      // Após o login, verificamos se ele pode avançar ou precisa de pagar
+      handleNextToMapping(); 
     } catch (error) {
       if (error.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está registado. Faça login.');
       else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') setAuthError('Credenciais incorretas.');
@@ -141,11 +140,13 @@ export default function App() {
     try { await signInAnonymously(auth); } catch(e){}
   };
 
-  // AGORA SALVA OS DADOS COMPLETOS DA TABELA NO FIREBASE (fullData)
+  // === SALVAR NA NUVEM E LIMITAR A 10 HISTÓRICOS ===
   const saveToCloud = async (dataToSave) => {
     if (!isRealUser || !user) return;
     try {
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
+      
+      // 1. Salvar o novo documento
       await addDoc(recRef, {
         date: new Date().toISOString(),
         bankTotal: dataToSave.bankTotal,
@@ -153,11 +154,28 @@ export default function App() {
         difference: dataToSave.difference,
         matchedCount: dataToSave.matched.length,
         pendenciesCount: dataToSave.bankOnly.length + dataToSave.sysOnly.length,
-        fullData: JSON.stringify(dataToSave) // Salvamos as listas completas convertidas em texto
+        fullData: JSON.stringify(dataToSave)
       });
       setIsSavedToCloud(true);
+
+      // 2. Buscar todos para verificar o limite de 10
+      const snapshot = await getDocs(recRef);
+      if (snapshot.docs.length > 10) {
+        const docsArray = snapshot.docs.map(d => ({ id: d.id, date: d.data().date }));
+        // Ordenar do mais recente para o mais antigo
+        docsArray.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        // Obter os documentos que passaram do limite (a partir do índice 10)
+        const docsToDelete = docsArray.slice(10);
+        
+        // Apagar um a um na base de dados
+        for (const docItem of docsToDelete) {
+          const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'reconciliations', docItem.id);
+          await deleteDoc(docRef);
+        }
+      }
     } catch (e) {
-      console.error("Erro ao salvar na nuvem", e);
+      console.error("Erro ao salvar ou limpar histórico na nuvem", e);
     }
   };
 
@@ -184,10 +202,9 @@ export default function App() {
     fetchHistory();
   };
 
-  // FUNÇÃO PARA ABRIR UMA CONCILIAÇÃO ANTIGA
   const loadHistoricalReconciliation = (rec) => {
     if (!rec.fullData) {
-      alert("Esta conciliação é de uma versão antiga e não guardou os detalhes da tabela.");
+      alert("Esta conciliação é antiga e não guardou os detalhes.");
       return;
     }
     try {
@@ -195,20 +212,53 @@ export default function App() {
       setResults(parsedData);
       setStep(3);
       setShowHistoryModal(false);
-      setIsSavedToCloud(true); // Já estava salvo na nuvem
+      setIsSavedToCloud(true);
     } catch(e) {
-      console.error("Erro ao ler dados históricos", e);
-      alert("Erro ao carregar o detalhamento desta conciliação.");
+      console.error("Erro", e);
+      alert("Erro ao carregar o detalhamento.");
     }
   };
 
+  // === CONTROLO DE ACESSO AVANÇADO (LÓGICA DE NEGÓCIO) ===
   const handleNextToMapping = () => {
     const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
+    
+    // Regra 1: Se já usou 1 vez, TEM de estar registado.
     if (usages >= 1 && !isRealUser) {
       setShowAuthWall(true);
       return;
     }
+    
+    // Regra 2: Se está registado, mas não é Premium E não tem créditos Avulsos E já gastou a gratuita = PAYWALL DE PLANOS
+    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits <= 0) {
+      setShowPricingModal(true);
+      return;
+    }
+
+    // Se chegou aqui, ele pode passar. Se gastou um avulso, descontamos 1 (simulação)
+    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits > 0) {
+      setAvulsoCredits(prev => prev - 1);
+    }
+    
     setStep(2);
+  };
+
+  // === SIMULAÇÃO DO STRIPE (Para você testar o MVP) ===
+  const simulateStripePayment = (type) => {
+    // No futuro, este botão terá um window.location.href = "SEU_LINK_DO_STRIPE";
+    if (type === 'avulso') {
+      setAvulsoCredits(prev => prev + 1);
+      alert("Sucesso! Pagamento de R$ 1,99 simulado. Você ganhou 1 acesso avulso.");
+    } else if (type === 'premium') {
+      setUserPlan('premium');
+      alert("Sucesso! Pagamento de R$ 49,90 simulado. Bem-vindo ao Premium!");
+    }
+    setShowPricingModal(false);
+    
+    // Se ele comprou e estava no passo 1, avança automaticamente.
+    if (step === 1 && bankFile && sysFile) {
+      setStep(2);
+    }
   };
 
   const restoreSession = () => {
@@ -401,12 +451,10 @@ export default function App() {
   ]);
 
   const exportToExcel = () => {
-    // Bloqueia a exportação de sugestões se não for premium
-    if (activeTab === 'sugestoes' && !isPremium) {
-      alert("A exportação de Sugestões Automáticas é exclusiva para assinantes Premium.");
+    if (activeTab === 'sugestoes' && userPlan !== 'premium') {
+      setShowPricingModal(true);
       return;
     }
-    
     if (!window.XLSX || sugestoesList.length === 0) return alert("Não há dados.");
     const exportData = sugestoesList.map(item => ({ 'Ação': item.action, 'Data': item.date, 'Histórico Original': item.desc, 'Valor Original (R$)': item.value }));
     const worksheet = window.XLSX.utils.json_to_sheet(exportData);
@@ -450,7 +498,10 @@ export default function App() {
         <div className="absolute top-6 right-6 flex items-center gap-3">
           {isRealUser ? (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:inline-block">Olá, {user?.email?.split('@')[0]}</span>
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:inline-block">
+                Olá, {user?.email?.split('@')[0]}
+                {userPlan === 'premium' && <span className="ml-2 bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">Premium</span>}
+              </span>
               
               <button onClick={openHistory} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm">
                 <History size={16} /> <span className="hidden sm:inline">Histórico</span>
@@ -466,16 +517,76 @@ export default function App() {
           </button>
         </div>
 
+        {/* === ECRÃ DE PREÇOS / PLANOS (STRIPE) === */}
+        {showPricingModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative border border-slate-200 dark:border-slate-800">
+              <button onClick={() => setShowPricingModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-full p-1"><XCircle size={24} /></button>
+              
+              <div className="text-center pt-10 pb-6 px-6">
+                <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-2">Escolha o seu plano</h2>
+                <p className="text-slate-500 dark:text-slate-400 max-w-lg mx-auto">A conciliação manual consome horas do seu dia. Deixe a nossa inteligência trabalhar por si.</p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6 p-6 lg:p-10 bg-slate-50 dark:bg-slate-900">
+                
+                {/* PLANO AVULSO */}
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 flex flex-col h-full shadow-sm hover:shadow-md transition">
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><CreditCard size={20} className="text-slate-500" /> Passe Avulso</h3>
+                    <div className="mb-4">
+                      <span className="text-4xl font-extrabold text-slate-900 dark:text-white">R$ 1,99</span>
+                      <span className="text-slate-500 dark:text-slate-400">/uso</span>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Ideal para quem faz conciliações raramente e quer apenas descobrir os furos de caixa.</p>
+                    <ul className="space-y-3 mb-8 text-sm text-slate-600 dark:text-slate-300">
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Permite 1 Conciliação no sistema</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Mostra totais e diferenças</li>
+                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Abas de Sugestões Automáticas</span></li>
+                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
+                    </ul>
+                  </div>
+                  <button onClick={() => simulateStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso</button>
+                </div>
+
+                {/* PLANO MENSAL PREMIUM */}
+                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-6 border-2 border-blue-500 flex flex-col h-full shadow-xl relative transform md:-translate-y-2">
+                  <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full flex items-center gap-1">
+                    <Crown size={12} /> Mais Popular
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><Zap size={20} className="text-yellow-500" /> Assinatura Premium</h3>
+                    <div className="mb-4">
+                      <span className="text-4xl font-extrabold text-blue-600 dark:text-blue-400">R$ 49,90</span>
+                      <span className="text-slate-500 dark:text-slate-400">/mês</span>
+                    </div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Para profissionais, BPOs e escritórios que precisam de produtividade máxima e relatórios instantâneos.</p>
+                    <ul className="space-y-3 mb-8 text-sm text-slate-800 dark:text-slate-200 font-medium">
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Conciliações Ilimitadas</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Histórico salvo na nuvem</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Desbloqueio da "Inteligência de Sugestões"</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Exportação para Excel (Um clique)</li>
+                    </ul>
+                  </div>
+                  <button onClick={() => simulateStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg">Assinar Premium</button>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* === MODAL DE HISTÓRICO === */}
         {showHistoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
               <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
               
-              <div className="flex items-center gap-3 mb-6">
+              <div className="flex items-center gap-3 mb-2">
                 <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg text-blue-600 dark:text-blue-400"><History size={24} /></div>
-                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico de Conciliações</h2>
+                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico</h2>
               </div>
+              <p className="text-xs text-slate-500 mb-6 ml-12">Por segurança e desempenho, mantemos apenas os últimos 10 relatórios salvos.</p>
 
               <div className="overflow-y-auto flex-1 pr-2">
                 {loadingHistory ? (
@@ -527,7 +638,7 @@ export default function App() {
           </div>
         )}
 
-        {/* === PAYWALL MODAL === */}
+        {/* === PAYWALL DE LOGIN === */}
         {showAuthWall && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
@@ -659,7 +770,6 @@ export default function App() {
               {isRealUser && isSavedToCloud && (
                 <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center justify-between border border-blue-200 dark:border-blue-800/50">
                   <div className="flex items-center gap-2"><Cloud size={18} /> Salvo automaticamente na nuvem</div>
-                  {/* BOTÃO PARA VOLTAR PARA A HOME SE ESTIVER A VER UM HISTÓRICO */}
                   <button onClick={resetApp} className="text-blue-600 hover:underline font-bold">Nova Conciliação</button>
                 </div>
               )}
@@ -680,7 +790,7 @@ export default function App() {
                 {[{id: 'pendencia', icon: SplitSquareHorizontal, label: 'Pendência'}, {id: 'sugestoes', icon: ListChecks, label: 'Sugestões', isPremium: true}, {id: 'banco', icon: Landmark, label: 'Banco'}, {id: 'sistema', icon: Monitor, label: 'Sistema'}].map(tab => (
                   <button key={tab.id} className={`pb-3 px-2 font-bold flex items-center gap-2 ${activeTab === tab.id ? 'border-b-4 border-blue-600 text-blue-700 dark:text-blue-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`} onClick={() => setActiveTab(tab.id)}>
                     <tab.icon size={20} /> {tab.label}
-                    {tab.isPremium && !isPremium && <Lock size={12} className="text-yellow-500 mb-3" />}
+                    {tab.isPremium && userPlan !== 'premium' && <Lock size={12} className="text-yellow-500 mb-3" />}
                   </button>
                 ))}
               </div>
@@ -696,17 +806,17 @@ export default function App() {
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden relative">
                   
                   {/* OVERLAY PREMIUM SE O USUÁRIO NÃO TIVER PAGO */}
-                  {!isPremium && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[3px]">
+                  {userPlan !== 'premium' && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[4px]">
                       <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl text-center max-w-sm border-2 border-yellow-400 dark:border-yellow-600 m-4 transform transition-all hover:scale-105">
                         <div className="mx-auto w-16 h-16 bg-gradient-to-br from-yellow-300 to-yellow-500 text-white rounded-full flex items-center justify-center mb-4 shadow-lg">
                           <Crown size={32} />
                         </div>
                         <h3 className="text-xl font-extrabold mb-2 text-slate-800 dark:text-white">Inteligência Bloqueada</h3>
                         <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">
-                          Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas de trabalho com a exportação inteligente.
+                          Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas com a exportação de um clique.
                         </p>
-                        <button className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition w-full flex items-center justify-center gap-2">
+                        <button onClick={() => setShowPricingModal(true)} className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition w-full flex items-center justify-center gap-2">
                           <Lock size={18} /> Desbloquear Sugestões
                         </button>
                       </div>
@@ -714,7 +824,7 @@ export default function App() {
                   )}
 
                   {/* TABELA DE CONTEÚDO (Borrada se não for premium) */}
-                  <div className={!isPremium ? 'filter blur-[5px] select-none pointer-events-none opacity-40' : ''}>
+                  <div className={userPlan !== 'premium' ? 'filter blur-[5px] select-none pointer-events-none opacity-40' : ''}>
                     <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2"><ListChecks size={20} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{sugestoesList.length} itens</span></div>
                     <div className="overflow-x-auto max-h-[500px]">
                       <table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Ação" sortKey="action" /><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
@@ -747,7 +857,10 @@ export default function App() {
                 )
               })()}
 
-              <div className="mt-8 text-center flex flex-wrap justify-center gap-4"><button onClick={resetApp} className="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-100 font-bold py-3 px-8 rounded-lg">Encerrar e Iniciar Nova</button><button onClick={exportToExcel} className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2"><Download size={20} /> Exportar</button></div>
+              <div className="mt-8 text-center flex flex-wrap justify-center gap-4">
+                <button onClick={resetApp} className="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-100 font-bold py-3 px-8 rounded-lg">Encerrar e Iniciar Nova</button>
+                <button onClick={exportToExcel} className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2"><Download size={20} /> Exportar</button>
+              </div>
             </div>
           )}
         </div>
