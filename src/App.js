@@ -59,7 +59,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [isRealUser, setIsRealUser] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
-  const [showPricingModal, setShowPricingModal] = useState(false); // Novo Modal de Preços
+  const [showPricingModal, setShowPricingModal] = useState(false);
   const [authMode, setAuthMode] = useState('register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -67,7 +67,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
   
-  // ESTADOS DO PRODUTO (Para MVP estamos a guardar no estado/local)
+  // ESTADOS DO PRODUTO (Nesta fase MVP controlamos manualmente)
   const [userPlan, setUserPlan] = useState('free'); // 'free' ou 'premium'
   const [avulsoCredits, setAvulsoCredits] = useState(0);
 
@@ -124,7 +124,6 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       setShowAuthWall(false);
-      // Após o login, verificamos se ele pode avançar ou precisa de pagar
       handleNextToMapping(); 
     } catch (error) {
       if (error.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está registado. Faça login.');
@@ -146,7 +145,6 @@ export default function App() {
     try {
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
       
-      // 1. Salvar o novo documento
       await addDoc(recRef, {
         date: new Date().toISOString(),
         bankTotal: dataToSave.bankTotal,
@@ -158,17 +156,11 @@ export default function App() {
       });
       setIsSavedToCloud(true);
 
-      // 2. Buscar todos para verificar o limite de 10
       const snapshot = await getDocs(recRef);
       if (snapshot.docs.length > 10) {
         const docsArray = snapshot.docs.map(d => ({ id: d.id, date: d.data().date }));
-        // Ordenar do mais recente para o mais antigo
         docsArray.sort((a, b) => new Date(b.date) - new Date(a.date));
-        
-        // Obter os documentos que passaram do limite (a partir do índice 10)
         const docsToDelete = docsArray.slice(10);
-        
-        // Apagar um a um na base de dados
         for (const docItem of docsToDelete) {
           const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'reconciliations', docItem.id);
           await deleteDoc(docRef);
@@ -219,23 +211,19 @@ export default function App() {
     }
   };
 
-  // === CONTROLO DE ACESSO AVANÇADO (LÓGICA DE NEGÓCIO) ===
   const handleNextToMapping = () => {
     const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
     
-    // Regra 1: Se já usou 1 vez, TEM de estar registado.
     if (usages >= 1 && !isRealUser) {
       setShowAuthWall(true);
       return;
     }
     
-    // Regra 2: Se está registado, mas não é Premium E não tem créditos Avulsos E já gastou a gratuita = PAYWALL DE PLANOS
     if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits <= 0) {
       setShowPricingModal(true);
       return;
     }
 
-    // Se chegou aqui, ele pode passar. Se gastou um avulso, descontamos 1 (simulação)
     if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits > 0) {
       setAvulsoCredits(prev => prev - 1);
     }
@@ -243,19 +231,28 @@ export default function App() {
     setStep(2);
   };
 
-  // === SIMULAÇÃO DO STRIPE (Para você testar o MVP) ===
-  const simulateStripePayment = (type) => {
-    // No futuro, este botão terá um window.location.href = "SEU_LINK_DO_STRIPE";
-    if (type === 'avulso') {
-      setAvulsoCredits(prev => prev + 1);
-      alert("Sucesso! Pagamento de R$ 1,99 simulado. Você ganhou 1 acesso avulso.");
-    } else if (type === 'premium') {
-      setUserPlan('premium');
-      alert("Sucesso! Pagamento de R$ 49,90 simulado. Bem-vindo ao Premium!");
-    }
+  // === PAGAMENTOS REAIS STRIPE ===
+  const handleStripePayment = (type) => {
+    // 1. Informa o cliente
+    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após o pagamento, poderá continuar a usar o sistema normalmente!");
     setShowPricingModal(false);
+
+    // 2. Prepara o e-mail se ele já estiver logado
+    const emailParam = user && user.email ? `?prefilled_email=${encodeURIComponent(user.email)}` : '';
+
+    // 3. Redireciona para os links (COLE OS SEUS LINKS AQUI)
+    if (type === 'avulso') {
+      // Exemplo de como deve ficar: https://buy.stripe.com/test_123456789abc${emailParam}
+      window.open(https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400, '_blank');
+      
+      // Temporariamente, para MVP, vamos simular que ele ganha o crédito de imediato para testar.
+      // Quando for para produção, apague esta linha e controle tudo pela base de dados.
+      setAvulsoCredits(prev => prev + 1); 
+
+    } else if (type === 'premium') {
+      window.open(https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401, '_blank');
+    }
     
-    // Se ele comprou e estava no passo 1, avança automaticamente.
     if (step === 1 && bankFile && sysFile) {
       setStep(2);
     }
@@ -546,7 +543,7 @@ export default function App() {
                       <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
                     </ul>
                   </div>
-                  <button onClick={() => simulateStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso</button>
+                  <button onClick={() => handleStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso no Stripe</button>
                 </div>
 
                 {/* PLANO MENSAL PREMIUM */}
@@ -568,7 +565,7 @@ export default function App() {
                       <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Exportação para Excel (Um clique)</li>
                     </ul>
                   </div>
-                  <button onClick={() => simulateStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg">Assinar Premium</button>
+                  <button onClick={() => handleStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg">Assinar Premium com Stripe</button>
                 </div>
 
               </div>
@@ -805,7 +802,6 @@ export default function App() {
               {activeTab === 'sugestoes' && (
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden relative">
                   
-                  {/* OVERLAY PREMIUM SE O USUÁRIO NÃO TIVER PAGO */}
                   {userPlan !== 'premium' && (
                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[4px]">
                       <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl text-center max-w-sm border-2 border-yellow-400 dark:border-yellow-600 m-4 transform transition-all hover:scale-105">
@@ -823,7 +819,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* TABELA DE CONTEÚDO (Borrada se não for premium) */}
                   <div className={userPlan !== 'premium' ? 'filter blur-[5px] select-none pointer-events-none opacity-40' : ''}>
                     <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2"><ListChecks size={20} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{sugestoesList.length} itens</span></div>
                     <div className="overflow-x-auto max-h-[500px]">
