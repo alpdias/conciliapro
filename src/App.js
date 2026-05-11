@@ -3,7 +3,7 @@ import {
   Upload, FileSpreadsheet, CheckCircle, AlertCircle, Scale, 
   ArrowRight, XCircle, Eye, Landmark, Monitor, Calculator, 
   Filter, Save, ArrowUpDown, ListChecks, SplitSquareHorizontal, 
-  Moon, Sun, Download, Sparkles, Lock, Mail, Key, LogOut, Cloud, History 
+  Moon, Sun, Download, Sparkles, Lock, Mail, Key, LogOut, Cloud, History, Crown
 } from 'lucide-react';
 
 // === IMPORTAÇÕES DO FIREBASE ===
@@ -55,7 +55,7 @@ export default function App() {
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   
-  // Autenticação
+  // Autenticação e Planos
   const [user, setUser] = useState(null);
   const [isRealUser, setIsRealUser] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
@@ -65,6 +65,9 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
+  
+  // VARIÁVEL DE MONETIZAÇÃO (Falsa por enquanto, depois ligaremos ao Stripe)
+  const [isPremium, setIsPremium] = useState(false); 
 
   // Histórico
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -138,6 +141,7 @@ export default function App() {
     try { await signInAnonymously(auth); } catch(e){}
   };
 
+  // AGORA SALVA OS DADOS COMPLETOS DA TABELA NO FIREBASE (fullData)
   const saveToCloud = async (dataToSave) => {
     if (!isRealUser || !user) return;
     try {
@@ -148,7 +152,8 @@ export default function App() {
         sysTotal: dataToSave.sysTotal,
         difference: dataToSave.difference,
         matchedCount: dataToSave.matched.length,
-        pendenciesCount: dataToSave.bankOnly.length + dataToSave.sysOnly.length
+        pendenciesCount: dataToSave.bankOnly.length + dataToSave.sysOnly.length,
+        fullData: JSON.stringify(dataToSave) // Salvamos as listas completas convertidas em texto
       });
       setIsSavedToCloud(true);
     } catch (e) {
@@ -162,12 +167,10 @@ export default function App() {
     try {
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
       const snapshot = await getDocs(recRef);
-      // Lê todos os documentos e formata
       const historyData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
-      // Ordena do mais recente para o mais antigo na memória do navegador
       historyData.sort((a, b) => new Date(b.date) - new Date(a.date));
       setUserHistory(historyData);
     } catch (e) {
@@ -179,6 +182,24 @@ export default function App() {
   const openHistory = () => {
     setShowHistoryModal(true);
     fetchHistory();
+  };
+
+  // FUNÇÃO PARA ABRIR UMA CONCILIAÇÃO ANTIGA
+  const loadHistoricalReconciliation = (rec) => {
+    if (!rec.fullData) {
+      alert("Esta conciliação é de uma versão antiga e não guardou os detalhes da tabela.");
+      return;
+    }
+    try {
+      const parsedData = JSON.parse(rec.fullData);
+      setResults(parsedData);
+      setStep(3);
+      setShowHistoryModal(false);
+      setIsSavedToCloud(true); // Já estava salvo na nuvem
+    } catch(e) {
+      console.error("Erro ao ler dados históricos", e);
+      alert("Erro ao carregar o detalhamento desta conciliação.");
+    }
   };
 
   const handleNextToMapping = () => {
@@ -380,6 +401,12 @@ export default function App() {
   ]);
 
   const exportToExcel = () => {
+    // Bloqueia a exportação de sugestões se não for premium
+    if (activeTab === 'sugestoes' && !isPremium) {
+      alert("A exportação de Sugestões Automáticas é exclusiva para assinantes Premium.");
+      return;
+    }
+    
     if (!window.XLSX || sugestoesList.length === 0) return alert("Não há dados.");
     const exportData = sugestoesList.map(item => ({ 'Ação': item.action, 'Data': item.date, 'Histórico Original': item.desc, 'Valor Original (R$)': item.value }));
     const worksheet = window.XLSX.utils.json_to_sheet(exportData);
@@ -425,11 +452,7 @@ export default function App() {
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:inline-block">Olá, {user?.email?.split('@')[0]}</span>
               
-              {/* BOTÃO DE HISTÓRICO NOVO */}
-              <button 
-                onClick={openHistory} 
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition"
-              >
+              <button onClick={openHistory} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm">
                 <History size={16} /> <span className="hidden sm:inline">Histórico</span>
               </button>
 
@@ -443,7 +466,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* === MODAL DE HISTÓRICO (NOVO) === */}
+        {/* === MODAL DE HISTÓRICO === */}
         {showHistoryModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
@@ -468,9 +491,17 @@ export default function App() {
                       const d = new Date(rec.date);
                       const isBalance = Math.abs(rec.difference) < 0.01;
                       return (
-                        <div key={rec.id} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div 
+                          key={rec.id} 
+                          onClick={() => loadHistoricalReconciliation(rec)}
+                          className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition shadow-sm hover:shadow"
+                          title="Clique para ver os detalhes"
+                        >
                           <div>
-                            <p className="font-bold text-slate-800 dark:text-slate-200">{d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
+                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                              {d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                              {rec.fullData && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">Ver Detalhes</span>}
+                            </p>
                             <div className="flex gap-4 mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
                               <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500"/> {rec.matchedCount} Iguais</span>
                               <span className="flex items-center gap-1"><AlertCircle size={12} className="text-orange-500"/> {rec.pendenciesCount} Pendências</span>
@@ -626,8 +657,10 @@ export default function App() {
           {step === 3 && (
             <div>
               {isRealUser && isSavedToCloud && (
-                <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center gap-2 border border-blue-200 dark:border-blue-800/50">
-                  <Cloud size={18} /> Salvo automaticamente na nuvem
+                <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center justify-between border border-blue-200 dark:border-blue-800/50">
+                  <div className="flex items-center gap-2"><Cloud size={18} /> Salvo automaticamente na nuvem</div>
+                  {/* BOTÃO PARA VOLTAR PARA A HOME SE ESTIVER A VER UM HISTÓRICO */}
+                  <button onClick={resetApp} className="text-blue-600 hover:underline font-bold">Nova Conciliação</button>
                 </div>
               )}
 
@@ -644,8 +677,11 @@ export default function App() {
               </div>
 
               <div className="flex border-b border-slate-300 dark:border-slate-700 mb-6 gap-6 overflow-x-auto">
-                {[{id: 'pendencia', icon: SplitSquareHorizontal, label: 'Pendência'}, {id: 'sugestoes', icon: ListChecks, label: 'Sugestões'}, {id: 'banco', icon: Landmark, label: 'Banco'}, {id: 'sistema', icon: Monitor, label: 'Sistema'}].map(tab => (
-                  <button key={tab.id} className={`pb-3 px-2 font-bold flex items-center gap-2 ${activeTab === tab.id ? 'border-b-4 border-blue-600 text-blue-700 dark:text-blue-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`} onClick={() => setActiveTab(tab.id)}><tab.icon size={20} /> {tab.label}</button>
+                {[{id: 'pendencia', icon: SplitSquareHorizontal, label: 'Pendência'}, {id: 'sugestoes', icon: ListChecks, label: 'Sugestões', isPremium: true}, {id: 'banco', icon: Landmark, label: 'Banco'}, {id: 'sistema', icon: Monitor, label: 'Sistema'}].map(tab => (
+                  <button key={tab.id} className={`pb-3 px-2 font-bold flex items-center gap-2 ${activeTab === tab.id ? 'border-b-4 border-blue-600 text-blue-700 dark:text-blue-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`} onClick={() => setActiveTab(tab.id)}>
+                    <tab.icon size={20} /> {tab.label}
+                    {tab.isPremium && !isPremium && <Lock size={12} className="text-yellow-500 mb-3" />}
+                  </button>
                 ))}
               </div>
 
@@ -655,10 +691,38 @@ export default function App() {
                 {(filterStart || filterEnd) && <button onClick={() => { setFilterStart(''); setFilterEnd(''); }} className="text-blue-600 hover:underline">Limpar</button>}
               </div>
 
+              {/* === ABA SUGESTÕES (COM EFEITO BLUR PREMIUM) === */}
               {activeTab === 'sugestoes' && (
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2"><ListChecks size={20} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{sugestoesList.length} itens</span></div><div className="overflow-x-auto max-h-[500px]"><table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Ação" sortKey="action" /><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
-                  {sugestoesList.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-3">{item.action === 'Lançar' ? <span className="bg-green-100 text-green-800 font-bold px-2 py-1 rounded text-xs flex w-max gap-1"><ArrowRight size={14}/> Lançar</span> : <span className="bg-red-100 text-red-800 font-bold px-2 py-1 rounded text-xs flex w-max gap-1"><XCircle size={14}/> Remover</span>}</td><td className="p-3 whitespace-nowrap">{item.date}</td><td className="p-3">{item.desc}</td><td className={`p-3 text-right font-medium ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
-                </tbody></table></div></div>
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden relative">
+                  
+                  {/* OVERLAY PREMIUM SE O USUÁRIO NÃO TIVER PAGO */}
+                  {!isPremium && (
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[3px]">
+                      <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl text-center max-w-sm border-2 border-yellow-400 dark:border-yellow-600 m-4 transform transition-all hover:scale-105">
+                        <div className="mx-auto w-16 h-16 bg-gradient-to-br from-yellow-300 to-yellow-500 text-white rounded-full flex items-center justify-center mb-4 shadow-lg">
+                          <Crown size={32} />
+                        </div>
+                        <h3 className="text-xl font-extrabold mb-2 text-slate-800 dark:text-white">Inteligência Bloqueada</h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">
+                          Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas de trabalho com a exportação inteligente.
+                        </p>
+                        <button className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition w-full flex items-center justify-center gap-2">
+                          <Lock size={18} /> Desbloquear Sugestões
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TABELA DE CONTEÚDO (Borrada se não for premium) */}
+                  <div className={!isPremium ? 'filter blur-[5px] select-none pointer-events-none opacity-40' : ''}>
+                    <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2"><ListChecks size={20} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{sugestoesList.length} itens</span></div>
+                    <div className="overflow-x-auto max-h-[500px]">
+                      <table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Ação" sortKey="action" /><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
+                        {sugestoesList.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-3">{item.action === 'Lançar' ? <span className="bg-green-100 text-green-800 font-bold px-2 py-1 rounded text-xs flex w-max gap-1"><ArrowRight size={14}/> Lançar</span> : <span className="bg-red-100 text-red-800 font-bold px-2 py-1 rounded text-xs flex w-max gap-1"><XCircle size={14}/> Remover</span>}</td><td className="p-3 whitespace-nowrap">{item.date}</td><td className="p-3">{item.desc}</td><td className={`p-3 text-right font-medium ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
+                      </tbody></table>
+                    </div>
+                  </div>
+                </div>
               )}
 
               {activeTab === 'pendencia' && (
