@@ -1,7 +1,7 @@
 {
   "name": "conciliapro",
   "version": "1.0.0",
-  "description": "Sistema de Conciliação Financeira",
+  "description": "Sistema de Conciliacao Financeira",
   "main": "index.js",
   "scripts": {
     "start": "react-scripts start",
