@@ -9,7 +9,7 @@ import {
 // === IMPORTAÇÕES DO FIREBASE ===
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
+import { getFirestore, collection, addDoc, getDocs } from "firebase/firestore";
 
 // === CONFIGURAÇÃO DO FIREBASE (COLE AS SUAS CHAVES AQUI) ===
 let firebaseConfig = {
@@ -21,7 +21,6 @@ let firebaseConfig = {
   appId: "1:491412875969:web:46d6b2871a7e5929dd8240"
 };
 
-// (Mantém compatibilidade com o nosso ambiente de testes aqui no chat)
 if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 }
@@ -34,7 +33,6 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'conciliapro-default'
 export default function App() {
   const [isXlsxLoaded, setIsXlsxLoaded] = useState(false);
   
-  // States de Arquivos e Dados
   const [bankFile, setBankFile] = useState(null);
   const [sysFile, setSysFile] = useState(null);
   const [bankDataRaw, setBankDataRaw] = useState([]);
@@ -47,60 +45,57 @@ export default function App() {
   const [bankTemplateFound, setBankTemplateFound] = useState(false);
   const [sysTemplateFound, setSysTemplateFound] = useState(false);
   
-  // Opções e Filtros
   const [ignoreSigns, setIgnoreSigns] = useState(false);
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'asc' });
 
-  // Navegação
   const [step, setStep] = useState(1);
   const [activeTab, setActiveTab] = useState('pendencia');
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   
-  // === ESTADOS DE AUTENTICAÇÃO (NOVO) ===
+  // Autenticação
   const [user, setUser] = useState(null);
   const [isRealUser, setIsRealUser] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
-  const [authMode, setAuthMode] = useState('register'); // 'register' ou 'login'
+  const [authMode, setAuthMode] = useState('register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
 
+  // Histórico
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [userHistory, setUserHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   const [results, setResults] = useState({ 
     matched: [], bankOnly: [], sysOnly: [], allBank: [], allSys: [], 
     bankTotal: 0, sysTotal: 0, difference: 0 
   });
 
-  // Inicialização do Firebase Auth
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          // Login anónimo obrigatório para rastrear utilizadores gratuitos
           await signInAnonymously(auth);
         }
-      } catch (e) {
-        console.warn("Firebase Auth não configurado corretamente.", e);
-      }
+      } catch (e) {}
     };
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      // Se não for anónimo, é um utilizador registado/pago!
       setIsRealUser(currentUser && !currentUser.isAnonymous);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Inicialização do XLSX
   useEffect(() => {
     if (!window.XLSX) {
       const script = document.createElement('script');
@@ -117,7 +112,6 @@ export default function App() {
     } catch (e) {}
   }, []);
 
-  // === FUNÇÕES DE AUTENTICAÇÃO (NOVO) ===
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -129,12 +123,10 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       setShowAuthWall(false);
-      setStep(2); // Continua para o passo 2 automaticamente após login
+      setStep(2);
     } catch (error) {
       if (error.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está registado. Faça login.');
-      else if (error.code === 'auth/wrong-password') setAuthError('Senha incorreta.');
-      else if (error.code === 'auth/user-not-found') setAuthError('Utilizador não encontrado.');
-      else if (error.code === 'auth/weak-password') setAuthError('A senha deve ter pelo menos 6 caracteres.');
+      else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') setAuthError('Credenciais incorretas.');
       else setAuthError('Erro na autenticação. Verifique os dados.');
     }
     setAuthLoading(false);
@@ -143,14 +135,12 @@ export default function App() {
   const handleLogout = async () => {
     await signOut(auth);
     resetApp();
-    // Volta a logar anonimamente
     try { await signInAnonymously(auth); } catch(e){}
   };
 
   const saveToCloud = async (dataToSave) => {
     if (!isRealUser || !user) return;
     try {
-      // Regra 1 e 3 do Firestore: Caminho seguro e utilizador autenticado
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
       await addDoc(recRef, {
         date: new Date().toISOString(),
@@ -166,16 +156,37 @@ export default function App() {
     }
   };
 
-  // === CONTROLO DO PAYWALL (NOVO) ===
+  const fetchHistory = async () => {
+    if (!user || !isRealUser) return;
+    setLoadingHistory(true);
+    try {
+      const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
+      const snapshot = await getDocs(recRef);
+      // Lê todos os documentos e formata
+      const historyData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      // Ordena do mais recente para o mais antigo na memória do navegador
+      historyData.sort((a, b) => new Date(b.date) - new Date(a.date));
+      setUserHistory(historyData);
+    } catch (e) {
+      console.error("Erro ao buscar histórico", e);
+    }
+    setLoadingHistory(false);
+  };
+
+  const openHistory = () => {
+    setShowHistoryModal(true);
+    fetchHistory();
+  };
+
   const handleNextToMapping = () => {
     const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
-    
-    // Se já usou 1 vez e NÃO é utilizador registado, BARRA O ACESSO
     if (usages >= 1 && !isRealUser) {
       setShowAuthWall(true);
       return;
     }
-    
     setStep(2);
   };
 
@@ -322,13 +333,12 @@ export default function App() {
     
     setResults(finalResults);
     
-    // Processamento Pós-Conciliação: Contagem de Uso e Salvar na Nuvem
     try { 
       localStorage.setItem('conciliador_data', JSON.stringify(finalResults)); 
       if (!isRealUser) {
-        localStorage.setItem('concilia_usages', '1'); // Marca o uso gratuito
+        localStorage.setItem('concilia_usages', '1');
       } else {
-        saveToCloud(finalResults); // Salva na base de dados (Firestore)
+        saveToCloud(finalResults);
       }
       setHasSavedSession(true); 
     } catch(e){}
@@ -414,6 +424,15 @@ export default function App() {
           {isRealUser ? (
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:inline-block">Olá, {user?.email?.split('@')[0]}</span>
+              
+              {/* BOTÃO DE HISTÓRICO NOVO */}
+              <button 
+                onClick={openHistory} 
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition"
+              >
+                <History size={16} /> <span className="hidden sm:inline">Histórico</span>
+              </button>
+
               <button onClick={handleLogout} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition" title="Sair"><LogOut size={18} /></button>
             </div>
           ) : (
@@ -423,6 +442,59 @@ export default function App() {
             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
+
+        {/* === MODAL DE HISTÓRICO (NOVO) === */}
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
+              <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
+              
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg text-blue-600 dark:text-blue-400"><History size={24} /></div>
+                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico de Conciliações</h2>
+              </div>
+
+              <div className="overflow-y-auto flex-1 pr-2">
+                {loadingHistory ? (
+                  <div className="text-center py-10 text-slate-500">A carregar dados...</div>
+                ) : userHistory.length === 0 ? (
+                  <div className="text-center py-10">
+                    <History size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                    <p className="text-slate-500 dark:text-slate-400">Ainda não tem conciliações salvas na nuvem.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {userHistory.map((rec) => {
+                      const d = new Date(rec.date);
+                      const isBalance = Math.abs(rec.difference) < 0.01;
+                      return (
+                        <div key={rec.id} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div>
+                            <p className="font-bold text-slate-800 dark:text-slate-200">{d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</p>
+                            <div className="flex gap-4 mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500"/> {rec.matchedCount} Iguais</span>
+                              <span className="flex items-center gap-1"><AlertCircle size={12} className="text-orange-500"/> {rec.pendenciesCount} Pendências</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-6 sm:text-right">
+                            <div>
+                              <p className="text-xs uppercase font-bold text-slate-400 mb-1">Banco / Sistema</p>
+                              <p className="text-sm font-medium">{formatMoney(rec.bankTotal)}</p>
+                            </div>
+                            <div className={`p-2 rounded-lg ${isBalance ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'}`}>
+                              <p className="text-xs uppercase font-bold mb-1 opacity-80">Diferença</p>
+                              <p className="font-bold">{formatMoney(rec.difference)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* === PAYWALL MODAL === */}
         {showAuthWall && (
@@ -488,7 +560,7 @@ export default function App() {
             <div className="space-y-6">
               {hasSavedSession && (
                 <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/50 p-4 rounded-xl flex items-center justify-between shadow-sm">
-                  <div className="flex items-center gap-3 text-blue-800 dark:text-blue-300"><History size={24} /><div><h3 className="font-bold">Sessão Salva Encontrada</h3><p className="text-sm opacity-90">Deseja retomar a última conciliação?</p></div></div>
+                  <div className="flex items-center gap-3 text-blue-800 dark:text-blue-300"><Save size={24} /><div><h3 className="font-bold">Sessão Salva Encontrada</h3><p className="text-sm opacity-90">Deseja retomar a última conciliação?</p></div></div>
                   <button onClick={restoreSession} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold transition shadow">Retomar</button>
                 </div>
               )}
@@ -511,7 +583,6 @@ export default function App() {
                 </div>
               </div>
               <div className="flex justify-center mt-8">
-                {/* === BOTÃO DE CONTINUAR AGORA COM O BLOQUEIO (PAYWALL) === */}
                 <button onClick={handleNextToMapping} disabled={!bankFile || !sysFile || !isXlsxLoaded} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 px-8 rounded-lg flex items-center gap-2 transition">Continuar <ArrowRight size={20} /></button>
               </div>
             </div>
@@ -554,7 +625,6 @@ export default function App() {
 
           {step === 3 && (
             <div>
-              {/* === INDICAÇÃO DE GRAVAÇÃO NA NUVEM === */}
               {isRealUser && isSavedToCloud && (
                 <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center gap-2 border border-blue-200 dark:border-blue-800/50">
                   <Cloud size={18} /> Salvo automaticamente na nuvem
