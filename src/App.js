@@ -243,14 +243,14 @@ export default function App() {
     // 3. Redireciona para os links (COLE OS SEUS LINKS AQUI)
     if (type === 'avulso') {
       // Exemplo de como deve ficar: https://buy.stripe.com/test_123456789abc${emailParam}
-      window.open(https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400, '_blank');
+      window.open('https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400', '_blank');
       
       // Temporariamente, para MVP, vamos simular que ele ganha o crédito de imediato para testar.
       // Quando for para produção, apague esta linha e controle tudo pela base de dados.
       setAvulsoCredits(prev => prev + 1); 
 
     } else if (type === 'premium') {
-      window.open(https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401, '_blank');
+      window.open('https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401', '_blank');
     }
     
     if (step === 1 && bankFile && sysFile) {
