@@ -251,7 +251,20 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE (Já preenchidos com os seus links reais de teste)
+  // A FUNÇÃO QUE FALTAVA (CORRIGIDA)
+  // ====================================================================
+  const restoreSession = () => {
+    try {
+      const saved = localStorage.getItem('conciliador_data');
+      if (saved) {
+        setResults(JSON.parse(saved));
+        setStep(3);
+      }
+    } catch(e) {}
+  };
+
+  // ====================================================================
+  // 2. LINKS DO STRIPE (Já preenchidos com os seus links)
   // ====================================================================
   const handleStripePayment = (type) => {
     alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, retorne aqui e aguarde a liberação do sistema.");
