@@ -12,7 +12,7 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, 
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 
 // ====================================================================
-// 1. CHAVES DO FIREBASE (Já preenchidas com os seus dados)
+// 1. CHAVES DO FIREBASE
 // ====================================================================
 let firebaseConfig = {
   apiKey: "AIzaSyBiKrn-qzV-0d4sdWpizVjqKZJNRCZpoFo",
@@ -69,11 +69,13 @@ function ConciliaProApp() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState(''); // NOVO: Mensagem de sucesso
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
   
   const [userPlan, setUserPlan] = useState('free'); 
   const [avulsoCredits, setAvulsoCredits] = useState(0);
+  const [freeCredits, setFreeCredits] = useState(0); // NOVO: Créditos Iniciais
 
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [userHistory, setUserHistory] = useState([]);
@@ -103,7 +105,7 @@ function ConciliaProApp() {
     return () => unsubscribe();
   }, []);
 
-  // === LÊ O PERFIL DO FIREBASE ===
+  // === LÊ E CRIA O PERFIL DO FIREBASE (COM 5 CRÉDITOS INICIAIS) ===
   useEffect(() => {
     if (!user || !isRealUser) return;
     const fetchProfile = async () => {
@@ -114,12 +116,23 @@ function ConciliaProApp() {
           const data = snap.data();
           if (data.isPremium) setUserPlan('premium');
           else setUserPlan('free');
-          if (data.avulsoCredits) setAvulsoCredits(data.avulsoCredits);
+          if (data.avulsoCredits !== undefined) setAvulsoCredits(data.avulsoCredits);
+          
+          if (data.freeCredits !== undefined) {
+             setFreeCredits(data.freeCredits);
+          } else {
+             // Utilizadores antigos ganham 5 também
+             setFreeCredits(5);
+             setDoc(profileRef, { freeCredits: 5 }, { merge: true });
+          }
         } else {
+          // Utilizador NOVO ganha 5 créditos
+          setFreeCredits(5);
           await setDoc(profileRef, { 
             email: user.email, 
             isPremium: false, 
             avulsoCredits: 0,
+            freeCredits: 5,
             createdAt: new Date().toISOString()
           }, { merge: true });
         }
@@ -146,24 +159,36 @@ function ConciliaProApp() {
     } catch (e) {}
   }, []);
 
+  // === FLUXO DE LOGIN/REGISTO MELHORADO ===
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
+    setAuthSuccessMsg('');
     setAuthLoading(true);
     try {
       if (authMode === 'register') {
         await createUserWithEmailAndPassword(auth, email, password);
+        setAuthSuccessMsg('Conta criada com sucesso! A preparar ambiente...');
+        
+        // Aguarda 2 segundos para o cliente ler a mensagem antes de fechar a janela
+        setTimeout(() => {
+          setAuthLoading(false);
+          setShowAuthWall(false);
+          setAuthSuccessMsg('');
+          handleNextToMapping();
+        }, 2000);
       } else {
         await signInWithEmailAndPassword(auth, email, password);
+        setAuthLoading(false);
+        setShowAuthWall(false);
+        handleNextToMapping();
       }
-      setShowAuthWall(false);
-      handleNextToMapping();
     } catch (error) {
+      setAuthLoading(false);
       if (error.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está registado. Faça login.');
       else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') setAuthError('Credenciais incorretas.');
       else setAuthError('Erro na autenticação. Verifique os dados.');
     }
-    setAuthLoading(false);
   };
 
   const handleLogout = async () => {
@@ -171,6 +196,7 @@ function ConciliaProApp() {
     resetApp();
     setUserPlan('free');
     setAvulsoCredits(0);
+    setFreeCredits(0);
     try { await signInAnonymously(auth); } catch(e){}
   };
 
@@ -236,23 +262,20 @@ function ConciliaProApp() {
     }
   };
 
+  // Esta função agora apenas verifica se o cliente tem acesso (não desconta logo)
   const handleNextToMapping = () => {
-    const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
-    if (usages >= 1 && !isRealUser) { setShowAuthWall(true); return; }
-    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits <= 0) { setShowPricingModal(true); return; }
-    
-    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits > 0) { 
-      const novoCredito = avulsoCredits - 1;
-      setAvulsoCredits(novoCredito);
-      const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
-      setDoc(profileRef, { avulsoCredits: novoCredito }, { merge: true });
+    if (!isRealUser) {
+      const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
+      if (usages >= 1) { setShowAuthWall(true); return; }
+    } else {
+      if (userPlan !== 'premium' && freeCredits <= 0 && avulsoCredits <= 0) { 
+        setShowPricingModal(true); 
+        return; 
+      }
     }
     setStep(2);
   };
 
-  // ====================================================================
-  // A FUNÇÃO QUE FALTAVA (CORRIGIDA)
-  // ====================================================================
   const restoreSession = () => {
     try {
       const saved = localStorage.getItem('conciliador_data');
@@ -264,7 +287,7 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE (Já preenchidos com os seus links)
+  // 2. LINKS DO STRIPE (Os seus Links Oficiais)
   // ====================================================================
   const handleStripePayment = (type) => {
     alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, retorne aqui e aguarde a liberação do sistema.");
@@ -390,12 +413,32 @@ function ConciliaProApp() {
     const finalResults = { matched, bankOnly: bankUnmatched, sysOnly: sysUnmatched, allBank: normalizedBank, allSys: normalizedSys, bankTotal, sysTotal, difference: bankTotal - sysTotal };
     setResults(finalResults);
     
+    // === MUDANÇA: É AQUI QUE DESCONTA O CRÉDITO! (Apenas se o processo for concluído) ===
     try { 
       localStorage.setItem('conciliador_data', JSON.stringify(finalResults)); 
-      if (!isRealUser) localStorage.setItem('concilia_usages', '1');
-      else saveToCloud(finalResults);
+      
+      if (!isRealUser) {
+        localStorage.setItem('concilia_usages', '1');
+      } else {
+        if (userPlan !== 'premium') {
+          let newFree = freeCredits;
+          let newAvulso = avulsoCredits;
+          
+          if (newFree > 0) {
+            newFree -= 1;
+            setFreeCredits(newFree);
+          } else if (newAvulso > 0) {
+            newAvulso -= 1;
+            setAvulsoCredits(newAvulso);
+          }
+          const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
+          setDoc(profileRef, { freeCredits: newFree, avulsoCredits: newAvulso }, { merge: true });
+        }
+        saveToCloud(finalResults);
+      }
       setHasSavedSession(true); 
     } catch(e){}
+    
     setStep(3);
   };
 
@@ -476,10 +519,11 @@ function ConciliaProApp() {
         <div className="absolute top-6 right-6 flex items-center gap-3 z-40">
           {isRealUser ? (
             <div className="flex items-center gap-3">
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:inline-block">
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:flex items-center gap-1">
                 Olá, {user?.email?.split('@')[0]}
                 {userPlan === 'premium' && <span className="ml-2 bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">Premium</span>}
-                {avulsoCredits > 0 && userPlan !== 'premium' && <span className="ml-2 bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">{avulsoCredits} Avulsos</span>}
+                {userPlan !== 'premium' && freeCredits > 0 && <span className="ml-2 bg-green-100 text-green-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1"><CheckCircle size={10}/> {freeCredits} Grátis</span>}
+                {userPlan !== 'premium' && avulsoCredits > 0 && <span className="ml-2 bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">{avulsoCredits} Avulsos</span>}
               </span>
               <button onClick={openHistory} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm">
                 <History size={16} /> <span className="hidden sm:inline">Histórico</span>
@@ -681,7 +725,7 @@ function ConciliaProApp() {
                     <div className="mb-4"><span className="text-4xl font-extrabold text-slate-900 dark:text-white">R$ 1,99</span><span className="text-slate-500 dark:text-slate-400">/uso</span></div>
                     <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Ideal para quem faz conciliações raramente e quer apenas descobrir os furos de caixa.</p>
                     <ul className="space-y-3 mb-8 text-sm text-slate-600 dark:text-slate-300">
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Permite 1 Conciliação no sistema</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Permite +1 Conciliação no sistema</li>
                       <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Mostra totais e diferenças</li>
                       <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Abas de Sugestões Automáticas</span></li>
                       <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
@@ -709,73 +753,27 @@ function ConciliaProApp() {
           </div>
         )}
 
-        {showHistoryModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
-              <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
-              <div className="flex items-center gap-3 mb-2">
-                <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg text-blue-600 dark:text-blue-400"><History size={24} /></div>
-                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico</h2>
-              </div>
-              <p className="text-xs text-slate-500 mb-6 ml-12">Por segurança e desempenho, mantemos apenas os últimos 10 relatórios salvos.</p>
-
-              <div className="overflow-y-auto flex-1 pr-2">
-                {loadingHistory ? (
-                  <div className="text-center py-10 text-slate-500">A carregar dados...</div>
-                ) : userHistory.length === 0 ? (
-                  <div className="text-center py-10">
-                    <History size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                    <p className="text-slate-500 dark:text-slate-400">Ainda não tem conciliações salvas na nuvem.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {userHistory.map((rec) => {
-                      const d = new Date(rec.date);
-                      const isBalance = Math.abs(rec.difference) < 0.01;
-                      return (
-                        <div key={rec.id} onClick={() => loadHistoricalReconciliation(rec)} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition shadow-sm hover:shadow" title="Clique para ver os detalhes">
-                          <div>
-                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                              {d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
-                              {rec.fullData && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">Ver Detalhes</span>}
-                            </p>
-                            <div className="flex gap-4 mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                              <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500"/> {rec.matchedCount} Iguais</span>
-                              <span className="flex items-center gap-1"><AlertCircle size={12} className="text-orange-500"/> {rec.pendenciesCount} Pendências</span>
-                            </div>
-                          </div>
-                          <div className="flex gap-6 sm:text-right">
-                            <div><p className="text-xs uppercase font-bold text-slate-400 mb-1">Banco / Sistema</p><p className="text-sm font-medium">{formatMoney(rec.bankTotal)}</p></div>
-                            <div className={`p-2 rounded-lg ${isBalance ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'}`}><p className="text-xs uppercase font-bold mb-1 opacity-80">Diferença</p><p className="font-bold">{formatMoney(rec.difference)}</p></div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
+        {/* Modal de Autenticação com Mensagem de Sucesso */}
         {showAuthWall && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
             <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
               <button onClick={() => setShowAuthWall(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
               <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4"><Lock size={32} /></div>
               <h2 className="text-2xl font-bold text-center mb-2 dark:text-white">{authMode === 'register' ? 'Crie a sua Conta' : 'Bem-vindo de volta!'}</h2>
-              <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-sm">{authMode === 'register' ? 'Para usar o sistema e guardar os seus relatórios, crie uma conta gratuita.' : 'Faça login para continuar as suas conciliações.'}</p>
+              <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-sm">{authMode === 'register' ? 'Para ganhar 5 conciliações gratuitas e guardar os relatórios, crie uma conta.' : 'Faça login para continuar as suas conciliações.'}</p>
 
+              {/* Mensagens de Sucesso / Erro */}
+              {authSuccessMsg && <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm rounded-lg border border-green-200 dark:border-green-800/50 flex justify-center items-center font-bold gap-2"><CheckCircle size={18}/> {authSuccessMsg}</div>}
               {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg border border-red-200 dark:border-red-800/50">{authError}</div>}
 
               <form onSubmit={handleAuthSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">E-mail</label>
-                  <div className="relative"><Mail size={18} className="absolute left-3 top-3 text-slate-400" /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="seu@email.com" /></div>
+                  <div className="relative"><Mail size={18} className="absolute left-3 top-3 text-slate-400" /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={authLoading} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50" placeholder="seu@email.com" /></div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Senha</label>
-                  <div className="relative"><Key size={18} className="absolute left-3 top-3 text-slate-400" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="••••••••" /></div>
+                  <div className="relative"><Key size={18} className="absolute left-3 top-3 text-slate-400" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={authLoading} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50" placeholder="••••••••" /></div>
                 </div>
                 <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 rounded-lg shadow-md transition mt-2">{authLoading ? 'A processar...' : (authMode === 'register' ? 'Criar Conta e Continuar' : 'Entrar')}</button>
               </form>
@@ -793,7 +791,6 @@ function ConciliaProApp() {
   );
 }
 
-// === ESCUDO DE ERROS (Para não ficar a tela branca) ===
 export default class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { hasError: false, erroMsg: '' }; }
   static getDerivedStateFromError(error) { return { hasError: true, erroMsg: error.toString() }; }
