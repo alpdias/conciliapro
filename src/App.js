@@ -9,7 +9,7 @@ import {
 // === IMPORTAÇÕES DO FIREBASE ===
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 
 // === CONFIGURAÇÃO DO FIREBASE (COLE AS SUAS CHAVES AQUI) ===
 let firebaseConfig = {
@@ -50,7 +50,7 @@ export default function App() {
   const [filterEnd, setFilterEnd] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'date', direction: 'asc' });
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(1); 
   const [activeTab, setActiveTab] = useState('pendencia');
   const [hasSavedSession, setHasSavedSession] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -67,8 +67,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
   
-  // ESTADOS DO PRODUTO (Nesta fase MVP controlamos manualmente)
-  const [userPlan, setUserPlan] = useState('free'); // 'free' ou 'premium'
+  // ESTADOS DO PRODUTO (AGORA LIGADOS AO FIREBASE)
+  const [userPlan, setUserPlan] = useState('free'); 
   const [avulsoCredits, setAvulsoCredits] = useState(0);
 
   // Histórico
@@ -81,13 +81,14 @@ export default function App() {
     bankTotal: 0, sysTotal: 0, difference: 0 
   });
 
+  // 1. Inicializar Auth
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          await signInAnonymously(auth);
+          if (!auth.currentUser) await signInAnonymously(auth);
         }
       } catch (e) {}
     };
@@ -97,9 +98,39 @@ export default function App() {
       setUser(currentUser);
       setIsRealUser(currentUser && !currentUser.isAnonymous);
     });
-
     return () => unsubscribe();
   }, []);
+
+  // 2. A "ANTENA" DO PERFIL - Lê os planos do Firestore
+  useEffect(() => {
+    if (!user || !isRealUser) return;
+    
+    const fetchProfile = async () => {
+      try {
+        const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
+        const snap = await getDoc(profileRef);
+        
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.isPremium) setUserPlan('premium');
+          else setUserPlan('free');
+          if (data.avulsoCredits) setAvulsoCredits(data.avulsoCredits);
+        } else {
+          // Se não existir, cria a ficha do cliente automaticamente!
+          await setDoc(profileRef, { 
+            email: user.email, 
+            isPremium: false, 
+            avulsoCredits: 0,
+            createdAt: new Date().toISOString()
+          }, { merge: true });
+        }
+      } catch(e) {
+        console.error("Erro ao ler perfil", e);
+      }
+    };
+    
+    fetchProfile();
+  }, [user, isRealUser]);
 
   useEffect(() => {
     if (!window.XLSX) {
@@ -111,6 +142,10 @@ export default function App() {
     } else {
       setIsXlsxLoaded(true);
     }
+    try {
+      const saved = localStorage.getItem('conciliador_data');
+      if (saved) setHasSavedSession(true);
+    } catch (e) {}
   }, []);
 
   const handleAuthSubmit = async (e) => {
@@ -124,7 +159,7 @@ export default function App() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       setShowAuthWall(false);
-      handleNextToMapping(); 
+      handleNextToMapping();
     } catch (error) {
       if (error.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está registado. Faça login.');
       else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') setAuthError('Credenciais incorretas.');
@@ -136,15 +171,15 @@ export default function App() {
   const handleLogout = async () => {
     await signOut(auth);
     resetApp();
+    setUserPlan('free');
+    setAvulsoCredits(0);
     try { await signInAnonymously(auth); } catch(e){}
   };
 
-  // === SALVAR NA NUVEM E LIMITAR A 10 HISTÓRICOS ===
   const saveToCloud = async (dataToSave) => {
     if (!isRealUser || !user) return;
     try {
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
-      
       await addDoc(recRef, {
         date: new Date().toISOString(),
         bankTotal: dataToSave.bankTotal,
@@ -206,66 +241,37 @@ export default function App() {
       setShowHistoryModal(false);
       setIsSavedToCloud(true);
     } catch(e) {
-      console.error("Erro", e);
       alert("Erro ao carregar o detalhamento.");
     }
   };
 
   const handleNextToMapping = () => {
     const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
+    if (usages >= 1 && !isRealUser) { setShowAuthWall(true); return; }
+    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits <= 0) { setShowPricingModal(true); return; }
     
-    if (usages >= 1 && !isRealUser) {
-      setShowAuthWall(true);
-      return;
+    // Desconta o crédito avulso ao avançar
+    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits > 0) { 
+      const novoCredito = avulsoCredits - 1;
+      setAvulsoCredits(novoCredito);
+      // Atualiza na nuvem
+      const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
+      setDoc(profileRef, { avulsoCredits: novoCredito }, { merge: true });
     }
-    
-    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits <= 0) {
-      setShowPricingModal(true);
-      return;
-    }
-
-    if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits > 0) {
-      setAvulsoCredits(prev => prev - 1);
-    }
-    
     setStep(2);
   };
 
-  // === PAGAMENTOS REAIS STRIPE ===
   const handleStripePayment = (type) => {
-    // 1. Informa o cliente
-    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após o pagamento, poderá continuar a usar o sistema normalmente!");
+    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, aguarde a nossa libertação de sistema!");
     setShowPricingModal(false);
-
-    // 2. Prepara o e-mail se ele já estiver logado
     const emailParam = user && user.email ? `?prefilled_email=${encodeURIComponent(user.email)}` : '';
 
-    // 3. Redireciona para os links (COLE OS SEUS LINKS AQUI)
     if (type === 'avulso') {
-      // Exemplo de como deve ficar: https://buy.stripe.com/test_123456789abc${emailParam}
-      window.open('https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400', '_blank');
-      
-      // Temporariamente, para MVP, vamos simular que ele ganha o crédito de imediato para testar.
-      // Quando for para produção, apague esta linha e controle tudo pela base de dados.
-      setAvulsoCredits(prev => prev + 1); 
-
+      window.open(`https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400`, '_blank');
     } else if (type === 'premium') {
-      window.open('https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401', '_blank');
+      window.open(`https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401`, '_blank');
     }
-    
-    if (step === 1 && bankFile && sysFile) {
-      setStep(2);
-    }
-  };
-
-  const restoreSession = () => {
-    try {
-      const saved = localStorage.getItem('conciliador_data');
-      if (saved) {
-        setResults(JSON.parse(saved));
-        setStep(3);
-      }
-    } catch(e) {}
+    if (step === 1 && bankFile && sysFile) { setStep(2); }
   };
 
   const processExcel = (file, setRawData, setCols, setMapping, setTemplateFound) => {
@@ -279,19 +285,12 @@ export default function App() {
       
       if (jsonData.length > 0) {
         const columns = Object.keys(jsonData[0]);
-        setRawData(jsonData);
-        setCols(columns);
-        
+        setRawData(jsonData); setCols(columns);
         try {
           const colsKey = columns.join('||');
           const savedTemplates = JSON.parse(localStorage.getItem('conciliador_templates') || '{}');
-          if (savedTemplates[colsKey]) {
-            setMapping(savedTemplates[colsKey]);
-            if (setTemplateFound) setTemplateFound(true);
-            return;
-          }
+          if (savedTemplates[colsKey]) { setMapping(savedTemplates[colsKey]); if (setTemplateFound) setTemplateFound(true); return; }
         } catch(e) {}
-        
         if (setTemplateFound) setTemplateFound(false);
         const guessMap = { date: '', desc: '', value: '' };
         columns.forEach(col => {
@@ -350,11 +349,7 @@ export default function App() {
   };
 
   const runReconciliation = () => {
-    if (!bankMapping.date || !bankMapping.value || !sysMapping.date || !sysMapping.value) {
-      alert("Por favor, selecione as colunas de Data e Valor.");
-      return;
-    }
-
+    if (!bankMapping.date || !bankMapping.value || !sysMapping.date || !sysMapping.value) { alert("Por favor, selecione as colunas de Data e Valor."); return; }
     try {
       const savedTemplates = JSON.parse(localStorage.getItem('conciliador_templates') || '{}');
       if (bankCols.length > 0) savedTemplates[bankCols.join('||')] = bankMapping;
@@ -382,35 +377,21 @@ export default function App() {
         const valueMatch = Math.abs((ignoreSigns ? Math.abs(sRow.value) : sRow.value) - (ignoreSigns ? Math.abs(bRow.value) : bRow.value)) < 0.01;
         return dateMatch && valueMatch;
       });
-      if (matchIndex !== -1) { 
-        matched.push({ bank: bRow, sys: sysUnmatched[matchIndex] }); 
-        sysUnmatched.splice(matchIndex, 1); 
-      } else {
-        bankUnmatched.push(bRow);
-      }
+      if (matchIndex !== -1) { matched.push({ bank: bRow, sys: sysUnmatched[matchIndex] }); sysUnmatched.splice(matchIndex, 1); } 
+      else { bankUnmatched.push(bRow); }
     });
 
     const bankTotal = normalizedBank.reduce((acc, row) => acc + row.value, 0);
     const sysTotal = normalizedSys.reduce((acc, row) => acc + row.value, 0);
-    
-    const finalResults = { 
-      matched, bankOnly: bankUnmatched, sysOnly: sysUnmatched, 
-      allBank: normalizedBank, allSys: normalizedSys, 
-      bankTotal, sysTotal, difference: bankTotal - sysTotal 
-    };
-    
+    const finalResults = { matched, bankOnly: bankUnmatched, sysOnly: sysUnmatched, allBank: normalizedBank, allSys: normalizedSys, bankTotal, sysTotal, difference: bankTotal - sysTotal };
     setResults(finalResults);
     
     try { 
       localStorage.setItem('conciliador_data', JSON.stringify(finalResults)); 
-      if (!isRealUser) {
-        localStorage.setItem('concilia_usages', '1');
-      } else {
-        saveToCloud(finalResults);
-      }
+      if (!isRealUser) localStorage.setItem('concilia_usages', '1');
+      else saveToCloud(finalResults);
       setHasSavedSession(true); 
     } catch(e){}
-    
     setStep(3);
   };
 
@@ -421,7 +402,6 @@ export default function App() {
   };
 
   const formatMoney = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-
   const handleSort = (key) => setSortConfig({ key, direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc' });
 
   const sortData = (data) => {
@@ -448,10 +428,7 @@ export default function App() {
   ]);
 
   const exportToExcel = () => {
-    if (activeTab === 'sugestoes' && userPlan !== 'premium') {
-      setShowPricingModal(true);
-      return;
-    }
+    if (activeTab === 'sugestoes' && userPlan !== 'premium') { setShowPricingModal(true); return; }
     if (!window.XLSX || sugestoesList.length === 0) return alert("Não há dados.");
     const exportData = sugestoesList.map(item => ({ 'Ação': item.action, 'Data': item.date, 'Histórico Original': item.desc, 'Valor Original (R$)': item.value }));
     const worksheet = window.XLSX.utils.json_to_sheet(exportData);
@@ -489,204 +466,35 @@ export default function App() {
 
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans p-6 transition-colors duration-200 relative">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans transition-colors duration-200 relative">
         
         {/* === HEADER SUPERIOR DIREITO === */}
-        <div className="absolute top-6 right-6 flex items-center gap-3">
+        <div className="absolute top-6 right-6 flex items-center gap-3 z-40">
           {isRealUser ? (
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:inline-block">
                 Olá, {user?.email?.split('@')[0]}
                 {userPlan === 'premium' && <span className="ml-2 bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">Premium</span>}
+                {avulsoCredits > 0 && userPlan !== 'premium' && <span className="ml-2 bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">{avulsoCredits} Avulsos</span>}
               </span>
-              
               <button onClick={openHistory} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm">
                 <History size={16} /> <span className="hidden sm:inline">Histórico</span>
               </button>
-
               <button onClick={handleLogout} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition" title="Sair"><LogOut size={18} /></button>
             </div>
           ) : (
-            <button onClick={() => setShowAuthWall(true)} className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline">Fazer Login</button>
+            <button onClick={() => setShowAuthWall(true)} className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline px-4 py-2">Fazer Login</button>
           )}
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 transition" title="Alternar tema">
             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
 
-        {/* === ECRÃ DE PREÇOS / PLANOS (STRIPE) === */}
-        {showPricingModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative border border-slate-200 dark:border-slate-800">
-              <button onClick={() => setShowPricingModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-full p-1"><XCircle size={24} /></button>
-              
-              <div className="text-center pt-10 pb-6 px-6">
-                <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-2">Escolha o seu plano</h2>
-                <p className="text-slate-500 dark:text-slate-400 max-w-lg mx-auto">A conciliação manual consome horas do seu dia. Deixe a nossa inteligência trabalhar por si.</p>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-6 p-6 lg:p-10 bg-slate-50 dark:bg-slate-900">
-                
-                {/* PLANO AVULSO */}
-                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 flex flex-col h-full shadow-sm hover:shadow-md transition">
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><CreditCard size={20} className="text-slate-500" /> Passe Avulso</h3>
-                    <div className="mb-4">
-                      <span className="text-4xl font-extrabold text-slate-900 dark:text-white">R$ 1,99</span>
-                      <span className="text-slate-500 dark:text-slate-400">/uso</span>
-                    </div>
-                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Ideal para quem faz conciliações raramente e quer apenas descobrir os furos de caixa.</p>
-                    <ul className="space-y-3 mb-8 text-sm text-slate-600 dark:text-slate-300">
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Permite 1 Conciliação no sistema</li>
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Mostra totais e diferenças</li>
-                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Abas de Sugestões Automáticas</span></li>
-                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
-                    </ul>
-                  </div>
-                  <button onClick={() => handleStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso no Stripe</button>
-                </div>
-
-                {/* PLANO MENSAL PREMIUM */}
-                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-6 border-2 border-blue-500 flex flex-col h-full shadow-xl relative transform md:-translate-y-2">
-                  <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full flex items-center gap-1">
-                    <Crown size={12} /> Mais Popular
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><Zap size={20} className="text-yellow-500" /> Assinatura Premium</h3>
-                    <div className="mb-4">
-                      <span className="text-4xl font-extrabold text-blue-600 dark:text-blue-400">R$ 49,90</span>
-                      <span className="text-slate-500 dark:text-slate-400">/mês</span>
-                    </div>
-                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Para profissionais, BPOs e escritórios que precisam de produtividade máxima e relatórios instantâneos.</p>
-                    <ul className="space-y-3 mb-8 text-sm text-slate-800 dark:text-slate-200 font-medium">
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Conciliações Ilimitadas</li>
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Histórico salvo na nuvem</li>
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Desbloqueio da "Inteligência de Sugestões"</li>
-                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Exportação para Excel (Um clique)</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => handleStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg">Assinar Premium com Stripe</button>
-                </div>
-
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* === MODAL DE HISTÓRICO === */}
-        {showHistoryModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
-              <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
-              
-              <div className="flex items-center gap-3 mb-2">
-                <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg text-blue-600 dark:text-blue-400"><History size={24} /></div>
-                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico</h2>
-              </div>
-              <p className="text-xs text-slate-500 mb-6 ml-12">Por segurança e desempenho, mantemos apenas os últimos 10 relatórios salvos.</p>
-
-              <div className="overflow-y-auto flex-1 pr-2">
-                {loadingHistory ? (
-                  <div className="text-center py-10 text-slate-500">A carregar dados...</div>
-                ) : userHistory.length === 0 ? (
-                  <div className="text-center py-10">
-                    <History size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-                    <p className="text-slate-500 dark:text-slate-400">Ainda não tem conciliações salvas na nuvem.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {userHistory.map((rec) => {
-                      const d = new Date(rec.date);
-                      const isBalance = Math.abs(rec.difference) < 0.01;
-                      return (
-                        <div 
-                          key={rec.id} 
-                          onClick={() => loadHistoricalReconciliation(rec)}
-                          className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition shadow-sm hover:shadow"
-                          title="Clique para ver os detalhes"
-                        >
-                          <div>
-                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                              {d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
-                              {rec.fullData && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">Ver Detalhes</span>}
-                            </p>
-                            <div className="flex gap-4 mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                              <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500"/> {rec.matchedCount} Iguais</span>
-                              <span className="flex items-center gap-1"><AlertCircle size={12} className="text-orange-500"/> {rec.pendenciesCount} Pendências</span>
-                            </div>
-                          </div>
-                          <div className="flex gap-6 sm:text-right">
-                            <div>
-                              <p className="text-xs uppercase font-bold text-slate-400 mb-1">Banco / Sistema</p>
-                              <p className="text-sm font-medium">{formatMoney(rec.bankTotal)}</p>
-                            </div>
-                            <div className={`p-2 rounded-lg ${isBalance ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'}`}>
-                              <p className="text-xs uppercase font-bold mb-1 opacity-80">Diferença</p>
-                              <p className="font-bold">{formatMoney(rec.difference)}</p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* === PAYWALL DE LOGIN === */}
-        {showAuthWall && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
-              <button onClick={() => setShowAuthWall(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
-              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Lock size={32} />
-              </div>
-              <h2 className="text-2xl font-bold text-center mb-2 dark:text-white">
-                {authMode === 'register' ? 'Crie a sua Conta' : 'Bem-vindo de volta!'}
-              </h2>
-              <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-sm">
-                {authMode === 'register' 
-                  ? 'A sua primeira conciliação gratuita foi um sucesso! Para continuar a usar o sistema e guardar os seus relatórios, crie uma conta.'
-                  : 'Faça login para continuar as suas conciliações.'}
-              </p>
-
-              {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg border border-red-200 dark:border-red-800/50">{authError}</div>}
-
-              <form onSubmit={handleAuthSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">E-mail</label>
-                  <div className="relative">
-                    <Mail size={18} className="absolute left-3 top-3 text-slate-400" />
-                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="seu@email.com" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Senha</label>
-                  <div className="relative">
-                    <Key size={18} className="absolute left-3 top-3 text-slate-400" />
-                    <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="••••••••" />
-                  </div>
-                </div>
-                <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 rounded-lg shadow-md transition mt-2">
-                  {authLoading ? 'A processar...' : (authMode === 'register' ? 'Criar Conta e Continuar' : 'Entrar')}
-                </button>
-              </form>
-
-              <div className="mt-6 text-center text-sm">
-                <span className="text-slate-500 dark:text-slate-400">
-                  {authMode === 'register' ? 'Já tem uma conta?' : 'Ainda não tem conta?'}
-                </span>{' '}
-                <button onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')} className="text-blue-600 dark:text-blue-400 font-bold hover:underline">
-                  {authMode === 'register' ? 'Faça Login' : 'Criar Conta'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="max-w-5xl mx-auto pt-8">
+        {/* =========================================
+            STEPS 1, 2 e 3: A FERRAMENTA
+        ============================================= */}
+        <div className="max-w-5xl mx-auto pt-24 px-6 pb-12">
+          
           <header className="mb-10 flex flex-col items-center text-center">
             <div className="flex items-center justify-center gap-3">
               <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-xl"><Scale className="text-blue-600 dark:text-blue-400" size={32} strokeWidth={2.5} /></div>
@@ -696,7 +504,7 @@ export default function App() {
           </header>
 
           {step === 1 && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fade-in">
               {hasSavedSession && (
                 <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/50 p-4 rounded-xl flex items-center justify-between shadow-sm">
                   <div className="flex items-center gap-3 text-blue-800 dark:text-blue-300"><Save size={24} /><div><h3 className="font-bold">Sessão Salva Encontrada</h3><p className="text-sm opacity-90">Deseja retomar a última conciliação?</p></div></div>
@@ -722,13 +530,13 @@ export default function App() {
                 </div>
               </div>
               <div className="flex justify-center mt-8">
-                <button onClick={handleNextToMapping} disabled={!bankFile || !sysFile || !isXlsxLoaded} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 px-8 rounded-lg flex items-center gap-2 transition">Continuar <ArrowRight size={20} /></button>
+                <button onClick={handleNextToMapping} disabled={!bankFile || !sysFile || !isXlsxLoaded} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 px-8 rounded-lg flex items-center gap-2 transition shadow-lg">Continuar <ArrowRight size={20} /></button>
               </div>
             </div>
           )}
 
           {step === 2 && (
-            <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors">
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors animate-fade-in">
               <h2 className="text-2xl font-bold mb-6 dark:text-white">Confirme as Colunas</h2>
               <div className="grid md:grid-cols-2 gap-12 mb-8">
                 <div>
@@ -763,7 +571,7 @@ export default function App() {
           )}
 
           {step === 3 && (
-            <div>
+            <div className="animate-fade-in">
               {isRealUser && isSavedToCloud && (
                 <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center justify-between border border-blue-200 dark:border-blue-800/50">
                   <div className="flex items-center gap-2"><Cloud size={18} /> Salvo automaticamente na nuvem</div>
@@ -798,27 +606,20 @@ export default function App() {
                 {(filterStart || filterEnd) && <button onClick={() => { setFilterStart(''); setFilterEnd(''); }} className="text-blue-600 hover:underline">Limpar</button>}
               </div>
 
-              {/* === ABA SUGESTÕES (COM EFEITO BLUR PREMIUM) === */}
               {activeTab === 'sugestoes' && (
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden relative">
-                  
                   {userPlan !== 'premium' && (
                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[4px]">
                       <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl text-center max-w-sm border-2 border-yellow-400 dark:border-yellow-600 m-4 transform transition-all hover:scale-105">
-                        <div className="mx-auto w-16 h-16 bg-gradient-to-br from-yellow-300 to-yellow-500 text-white rounded-full flex items-center justify-center mb-4 shadow-lg">
-                          <Crown size={32} />
-                        </div>
+                        <div className="mx-auto w-16 h-16 bg-gradient-to-br from-yellow-300 to-yellow-500 text-white rounded-full flex items-center justify-center mb-4 shadow-lg"><Crown size={32} /></div>
                         <h3 className="text-xl font-extrabold mb-2 text-slate-800 dark:text-white">Inteligência Bloqueada</h3>
-                        <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">
-                          Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas com a exportação de um clique.
-                        </p>
+                        <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas com a exportação de um clique.</p>
                         <button onClick={() => setShowPricingModal(true)} className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition w-full flex items-center justify-center gap-2">
                           <Lock size={18} /> Desbloquear Sugestões
                         </button>
                       </div>
                     </div>
                   )}
-
                   <div className={userPlan !== 'premium' ? 'filter blur-[5px] select-none pointer-events-none opacity-40' : ''}>
                     <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2"><ListChecks size={20} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{sugestoesList.length} itens</span></div>
                     <div className="overflow-x-auto max-h-[500px]">
@@ -859,7 +660,133 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {/* === MODAIS GLOBAIS === */}
+        {showPricingModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative border border-slate-200 dark:border-slate-800">
+              <button onClick={() => setShowPricingModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-full p-1"><XCircle size={24} /></button>
+              
+              <div className="text-center pt-10 pb-6 px-6">
+                <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-2">Escolha o seu plano</h2>
+                <p className="text-slate-500 dark:text-slate-400 max-w-lg mx-auto">A conciliação manual consome horas do seu dia. Deixe a nossa inteligência trabalhar por si.</p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6 p-6 lg:p-10 bg-slate-50 dark:bg-slate-900">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 flex flex-col h-full shadow-sm hover:shadow-md transition">
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><CreditCard size={20} className="text-slate-500" /> Passe Avulso</h3>
+                    <div className="mb-4"><span className="text-4xl font-extrabold text-slate-900 dark:text-white">R$ 1,99</span><span className="text-slate-500 dark:text-slate-400">/uso</span></div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Ideal para quem faz conciliações raramente e quer apenas descobrir os furos de caixa.</p>
+                    <ul className="space-y-3 mb-8 text-sm text-slate-600 dark:text-slate-300">
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Permite 1 Conciliação no sistema</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Mostra totais e diferenças</li>
+                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Abas de Sugestões Automáticas</span></li>
+                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
+                    </ul>
+                  </div>
+                  <button onClick={() => handleStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso no Stripe</button>
+                </div>
+                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-6 border-2 border-blue-500 flex flex-col h-full shadow-xl relative transform md:-translate-y-2">
+                  <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full flex items-center gap-1"><Crown size={12} /> Mais Popular</div>
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><Zap size={20} className="text-yellow-500" /> Assinatura Premium</h3>
+                    <div className="mb-4"><span className="text-4xl font-extrabold text-blue-600 dark:text-blue-400">R$ 49,90</span><span className="text-slate-500 dark:text-slate-400">/mês</span></div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Para profissionais, BPOs e escritórios que precisam de produtividade máxima e relatórios instantâneos.</p>
+                    <ul className="space-y-3 mb-8 text-sm text-slate-800 dark:text-slate-200 font-medium">
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Conciliações Ilimitadas</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Histórico salvo na nuvem</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Desbloqueio da "Inteligência de Sugestões"</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Exportação para Excel (Um clique)</li>
+                    </ul>
+                  </div>
+                  <button onClick={() => handleStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg">Assinar Premium com Stripe</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
+              <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg text-blue-600 dark:text-blue-400"><History size={24} /></div>
+                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico</h2>
+              </div>
+              <p className="text-xs text-slate-500 mb-6 ml-12">Por segurança e desempenho, mantemos apenas os últimos 10 relatórios salvos.</p>
+
+              <div className="overflow-y-auto flex-1 pr-2">
+                {loadingHistory ? (
+                  <div className="text-center py-10 text-slate-500">A carregar dados...</div>
+                ) : userHistory.length === 0 ? (
+                  <div className="text-center py-10">
+                    <History size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                    <p className="text-slate-500 dark:text-slate-400">Ainda não tem conciliações salvas na nuvem.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {userHistory.map((rec) => {
+                      const d = new Date(rec.date);
+                      const isBalance = Math.abs(rec.difference) < 0.01;
+                      return (
+                        <div key={rec.id} onClick={() => loadHistoricalReconciliation(rec)} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition shadow-sm hover:shadow" title="Clique para ver os detalhes">
+                          <div>
+                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                              {d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                              {rec.fullData && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">Ver Detalhes</span>}
+                            </p>
+                            <div className="flex gap-4 mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500"/> {rec.matchedCount} Iguais</span>
+                              <span className="flex items-center gap-1"><AlertCircle size={12} className="text-orange-500"/> {rec.pendenciesCount} Pendências</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-6 sm:text-right">
+                            <div><p className="text-xs uppercase font-bold text-slate-400 mb-1">Banco / Sistema</p><p className="text-sm font-medium">{formatMoney(rec.bankTotal)}</p></div>
+                            <div className={`p-2 rounded-lg ${isBalance ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'}`}><p className="text-xs uppercase font-bold mb-1 opacity-80">Diferença</p><p className="font-bold">{formatMoney(rec.difference)}</p></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAuthWall && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
+              <button onClick={() => setShowAuthWall(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
+              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4"><Lock size={32} /></div>
+              <h2 className="text-2xl font-bold text-center mb-2 dark:text-white">{authMode === 'register' ? 'Crie a sua Conta' : 'Bem-vindo de volta!'}</h2>
+              <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-sm">{authMode === 'register' ? 'Para usar o sistema e guardar os seus relatórios, crie uma conta gratuita.' : 'Faça login para continuar as suas conciliações.'}</p>
+
+              {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg border border-red-200 dark:border-red-800/50">{authError}</div>}
+
+              <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">E-mail</label>
+                  <div className="relative"><Mail size={18} className="absolute left-3 top-3 text-slate-400" /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="seu@email.com" /></div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Senha</label>
+                  <div className="relative"><Key size={18} className="absolute left-3 top-3 text-slate-400" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="••••••••" /></div>
+                </div>
+                <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 rounded-lg shadow-md transition mt-2">{authLoading ? 'A processar...' : (authMode === 'register' ? 'Criar Conta e Continuar' : 'Entrar')}</button>
+              </form>
+              <div className="mt-6 text-center text-sm"><span className="text-slate-500 dark:text-slate-400">{authMode === 'register' ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span> <button onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')} className="text-blue-600 dark:text-blue-400 font-bold hover:underline">{authMode === 'register' ? 'Faça Login' : 'Criar Conta'}</button></div>
+            </div>
+          </div>
+        )}
       </div>
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+      `}} />
     </div>
   );
 }
