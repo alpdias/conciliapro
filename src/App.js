@@ -11,7 +11,9 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 
-// === CONFIGURAÇÃO DO FIREBASE (COLE AS SUAS CHAVES AQUI) ===
+// ====================================================================
+// 1. CHAVES DO FIREBASE (Já preenchidas com os seus dados)
+// ====================================================================
 let firebaseConfig = {
   apiKey: "AIzaSyBiKrn-qzV-0d4sdWpizVjqKZJNRCZpoFo",
   authDomain: "conciliapro-69639.firebaseapp.com",
@@ -30,7 +32,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'conciliapro-default';
 
-export default function App() {
+// ====================================================================
+// COMPONENTE PRINCIPAL DO SISTEMA
+// ====================================================================
+function ConciliaProApp() {
   const [isXlsxLoaded, setIsXlsxLoaded] = useState(false);
   
   const [bankFile, setBankFile] = useState(null);
@@ -67,11 +72,9 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
   
-  // ESTADOS DO PRODUTO (AGORA LIGADOS AO FIREBASE)
   const [userPlan, setUserPlan] = useState('free'); 
   const [avulsoCredits, setAvulsoCredits] = useState(0);
 
-  // Histórico
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [userHistory, setUserHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -81,7 +84,6 @@ export default function App() {
     bankTotal: 0, sysTotal: 0, difference: 0 
   });
 
-  // 1. Inicializar Auth
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -101,22 +103,19 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. A "ANTENA" DO PERFIL - Lê os planos do Firestore
+  // === LÊ O PERFIL DO FIREBASE ===
   useEffect(() => {
     if (!user || !isRealUser) return;
-    
     const fetchProfile = async () => {
       try {
         const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
         const snap = await getDoc(profileRef);
-        
         if (snap.exists()) {
           const data = snap.data();
           if (data.isPremium) setUserPlan('premium');
           else setUserPlan('free');
           if (data.avulsoCredits) setAvulsoCredits(data.avulsoCredits);
         } else {
-          // Se não existir, cria a ficha do cliente automaticamente!
           await setDoc(profileRef, { 
             email: user.email, 
             isPremium: false, 
@@ -128,7 +127,6 @@ export default function App() {
         console.error("Erro ao ler perfil", e);
       }
     };
-    
     fetchProfile();
   }, [user, isRealUser]);
 
@@ -202,7 +200,7 @@ export default function App() {
         }
       }
     } catch (e) {
-      console.error("Erro ao salvar ou limpar histórico na nuvem", e);
+      console.error("Erro ao salvar", e);
     }
   };
 
@@ -212,14 +210,11 @@ export default function App() {
     try {
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
       const snapshot = await getDocs(recRef);
-      const historyData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const historyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       historyData.sort((a, b) => new Date(b.date) - new Date(a.date));
       setUserHistory(historyData);
     } catch (e) {
-      console.error("Erro ao buscar histórico", e);
+      console.error("Erro ao buscar", e);
     }
     setLoadingHistory(false);
   };
@@ -230,13 +225,9 @@ export default function App() {
   };
 
   const loadHistoricalReconciliation = (rec) => {
-    if (!rec.fullData) {
-      alert("Esta conciliação é antiga e não guardou os detalhes.");
-      return;
-    }
+    if (!rec.fullData) { alert("Esta conciliação é antiga e não guardou os detalhes."); return; }
     try {
-      const parsedData = JSON.parse(rec.fullData);
-      setResults(parsedData);
+      setResults(JSON.parse(rec.fullData));
       setStep(3);
       setShowHistoryModal(false);
       setIsSavedToCloud(true);
@@ -250,26 +241,27 @@ export default function App() {
     if (usages >= 1 && !isRealUser) { setShowAuthWall(true); return; }
     if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits <= 0) { setShowPricingModal(true); return; }
     
-    // Desconta o crédito avulso ao avançar
     if (isRealUser && userPlan !== 'premium' && usages >= 1 && avulsoCredits > 0) { 
       const novoCredito = avulsoCredits - 1;
       setAvulsoCredits(novoCredito);
-      // Atualiza na nuvem
       const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
       setDoc(profileRef, { avulsoCredits: novoCredito }, { merge: true });
     }
     setStep(2);
   };
 
+  // ====================================================================
+  // 2. LINKS DO STRIPE (Já preenchidos com os seus links reais de teste)
+  // ====================================================================
   const handleStripePayment = (type) => {
-    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, aguarde a nossa libertação de sistema!");
+    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, retorne aqui e aguarde a liberação do sistema.");
     setShowPricingModal(false);
     const emailParam = user && user.email ? `?prefilled_email=${encodeURIComponent(user.email)}` : '';
 
     if (type === 'avulso') {
-      window.open(`https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400`, '_blank');
+      window.open(`https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400${emailParam}`, '_blank');
     } else if (type === 'premium') {
-      window.open(`https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401`, '_blank');
+      window.open(`https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401${emailParam}`, '_blank');
     }
     if (step === 1 && bankFile && sysFile) { setStep(2); }
   };
@@ -282,7 +274,6 @@ export default function App() {
       const workbook = window.XLSX.read(data, { type: 'binary', cellDates: true });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { raw: true, defval: "" });
-      
       if (jsonData.length > 0) {
         const columns = Object.keys(jsonData[0]);
         setRawData(jsonData); setCols(columns);
@@ -468,7 +459,7 @@ export default function App() {
     <div className={darkMode ? 'dark' : ''}>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans transition-colors duration-200 relative">
         
-        {/* === HEADER SUPERIOR DIREITO === */}
+        {/* NAVEGAÇÃO SUPERIOR */}
         <div className="absolute top-6 right-6 flex items-center gap-3 z-40">
           {isRealUser ? (
             <div className="flex items-center gap-3">
@@ -490,9 +481,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* =========================================
-            STEPS 1, 2 e 3: A FERRAMENTA
-        ============================================= */}
+        {/* ÁREA DA FERRAMENTA */}
         <div className="max-w-5xl mx-auto pt-24 px-6 pb-12">
           
           <header className="mb-10 flex flex-col items-center text-center">
@@ -789,4 +778,23 @@ export default function App() {
       `}} />
     </div>
   );
+}
+
+// === ESCUDO DE ERROS (Para não ficar a tela branca) ===
+export default class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, erroMsg: '' }; }
+  static getDerivedStateFromError(error) { return { hasError: true, erroMsg: error.toString() }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '40px', fontFamily: 'sans-serif', background: '#fee2e2', color: '#991b1b', minHeight: '100vh' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>⚠️ Ups! Houve um erro de digitação.</h1>
+          <p>A tela ficou branca porque ocorreu um erro ao ler o código.</p>
+          <pre style={{ background: '#7f1d1d', color: 'white', padding: '15px', borderRadius: '8px', marginTop: '20px', overflowX: 'auto' }}>{this.state.erroMsg}</pre>
+          <p style={{ marginTop: '20px' }}><strong>Como resolver:</strong> Copie novamente TODO o código do chat e substitua completamente no ficheiro <code>App.jsx</code>.</p>
+        </div>
+      );
+    }
+    return <ConciliaProApp />;
+  }
 }
