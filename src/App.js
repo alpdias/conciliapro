@@ -69,13 +69,13 @@ function ConciliaProApp() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
-  const [authSuccessMsg, setAuthSuccessMsg] = useState(''); // NOVO: Mensagem de sucesso
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
   
   const [userPlan, setUserPlan] = useState('free'); 
   const [avulsoCredits, setAvulsoCredits] = useState(0);
-  const [freeCredits, setFreeCredits] = useState(0); // NOVO: Créditos Iniciais
+  const [freeCredits, setFreeCredits] = useState(0);
 
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [userHistory, setUserHistory] = useState([]);
@@ -121,12 +121,10 @@ function ConciliaProApp() {
           if (data.freeCredits !== undefined) {
              setFreeCredits(data.freeCredits);
           } else {
-             // Utilizadores antigos ganham 5 também
              setFreeCredits(5);
              setDoc(profileRef, { freeCredits: 5 }, { merge: true });
           }
         } else {
-          // Utilizador NOVO ganha 5 créditos
           setFreeCredits(5);
           await setDoc(profileRef, { 
             email: user.email, 
@@ -159,7 +157,6 @@ function ConciliaProApp() {
     } catch (e) {}
   }, []);
 
-  // === FLUXO DE LOGIN/REGISTO MELHORADO ===
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -170,7 +167,6 @@ function ConciliaProApp() {
         await createUserWithEmailAndPassword(auth, email, password);
         setAuthSuccessMsg('Conta criada com sucesso! A preparar ambiente...');
         
-        // Aguarda 2 segundos para o cliente ler a mensagem antes de fechar a janela
         setTimeout(() => {
           setAuthLoading(false);
           setShowAuthWall(false);
@@ -245,7 +241,13 @@ function ConciliaProApp() {
     setLoadingHistory(false);
   };
 
+  // === NOVO: HISTÓRICO BLOQUEADO PARA PREMIUM ===
   const openHistory = () => {
+    if (userPlan !== 'premium') {
+      alert("O acesso ao Histórico na nuvem é uma funcionalidade exclusiva do plano Premium!");
+      setShowPricingModal(true);
+      return;
+    }
     setShowHistoryModal(true);
     fetchHistory();
   };
@@ -262,7 +264,6 @@ function ConciliaProApp() {
     }
   };
 
-  // Esta função agora apenas verifica se o cliente tem acesso (não desconta logo)
   const handleNextToMapping = () => {
     if (!isRealUser) {
       const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
@@ -287,7 +288,7 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE (Os seus Links Oficiais)
+  // 2. LINKS DO STRIPE
   // ====================================================================
   const handleStripePayment = (type) => {
     alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, retorne aqui e aguarde a liberação do sistema.");
@@ -413,7 +414,6 @@ function ConciliaProApp() {
     const finalResults = { matched, bankOnly: bankUnmatched, sysOnly: sysUnmatched, allBank: normalizedBank, allSys: normalizedSys, bankTotal, sysTotal, difference: bankTotal - sysTotal };
     setResults(finalResults);
     
-    // === MUDANÇA: É AQUI QUE DESCONTA O CRÉDITO! (Apenas se o processo for concluído) ===
     try { 
       localStorage.setItem('conciliador_data', JSON.stringify(finalResults)); 
       
@@ -527,6 +527,7 @@ function ConciliaProApp() {
               </span>
               <button onClick={openHistory} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm">
                 <History size={16} /> <span className="hidden sm:inline">Histórico</span>
+                {userPlan !== 'premium' && <Lock size={12} className="opacity-60" />}
               </button>
               <button onClick={handleLogout} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition" title="Sair"><LogOut size={18} /></button>
             </div>
