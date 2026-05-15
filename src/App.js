@@ -241,7 +241,6 @@ function ConciliaProApp() {
     setLoadingHistory(false);
   };
 
-  // === NOVO: HISTÓRICO BLOQUEADO PARA PREMIUM ===
   const openHistory = () => {
     if (userPlan !== 'premium') {
       alert("O acesso ao Histórico na nuvem é uma funcionalidade exclusiva do plano Premium!");
@@ -288,10 +287,13 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE
+  // 2. LINKS DO STRIPE E CORREÇÃO DO "BYPASS"
   // ====================================================================
   const handleStripePayment = (type) => {
-    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, retorne aqui e aguarde a liberação do sistema.");
+    // Alerta instruindo o usuário a aguardar
+    alert("Como estamos num ambiente de testes, o pagamento será feito numa nova janela.\n\nApós o pagamento, atualize o site para que a sua conta seja liberada!");
+    
+    // Fecha o modal de preços para ele não ficar preso no ecrã
     setShowPricingModal(false);
     const emailParam = user && user.email ? `?prefilled_email=${encodeURIComponent(user.email)}` : '';
 
@@ -300,7 +302,9 @@ function ConciliaProApp() {
     } else if (type === 'premium') {
       window.open(`https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401${emailParam}`, '_blank');
     }
-    if (step === 1 && bankFile && sysFile) { setStep(2); }
+    
+    // ATENÇÃO: A linha que deixava avançar para o Step 2 foi REMOVIDA DAQUI! 
+    // Agora o sistema obriga-o a ter os créditos na base de dados para passar.
   };
 
   const processExcel = (file, setRawData, setCols, setMapping, setTemplateFound) => {
