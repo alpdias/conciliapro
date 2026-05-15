@@ -71,7 +71,10 @@ function ConciliaProApp() {
   const [authError, setAuthError] = useState('');
   const [authSuccessMsg, setAuthSuccessMsg] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  
   const [isSavedToCloud, setIsSavedToCloud] = useState(false);
+  const [cloudError, setCloudError] = useState(''); // NOVO: Guarda erros do Firebase (Gravação)
+  const [historyError, setHistoryError] = useState(''); // NOVO: Guarda erros do Firebase (Leitura)
   
   const [userPlan, setUserPlan] = useState('free'); 
   const [avulsoCredits, setAvulsoCredits] = useState(0);
@@ -105,7 +108,7 @@ function ConciliaProApp() {
     return () => unsubscribe();
   }, []);
 
-  // === LÊ E CRIA O PERFIL DO FIREBASE (COM 5 CRÉDITOS INICIAIS) ===
+  // === LÊ E CRIA O PERFIL DO FIREBASE ===
   useEffect(() => {
     if (!user || !isRealUser) return;
     const fetchProfile = async () => {
@@ -210,6 +213,7 @@ function ConciliaProApp() {
         fullData: JSON.stringify(dataToSave)
       });
       setIsSavedToCloud(true);
+      setCloudError(''); // Limpa erros antigos se der sucesso
 
       const snapshot = await getDocs(recRef);
       if (snapshot.docs.length > 10) {
@@ -223,12 +227,14 @@ function ConciliaProApp() {
       }
     } catch (e) {
       console.error("Erro ao salvar", e);
+      setCloudError("As regras do Firebase bloquearam a gravação. O seu Firebase está provavelmente trancado! Detalhe: " + e.message);
     }
   };
 
   const fetchHistory = async () => {
     if (!user || !isRealUser) return;
     setLoadingHistory(true);
+    setHistoryError('');
     try {
       const recRef = collection(db, 'artifacts', appId, 'users', user.uid, 'reconciliations');
       const snapshot = await getDocs(recRef);
@@ -237,6 +243,7 @@ function ConciliaProApp() {
       setUserHistory(historyData);
     } catch (e) {
       console.error("Erro ao buscar", e);
+      setHistoryError("As regras do Firebase bloquearam a leitura. Detalhe: " + e.message);
     }
     setLoadingHistory(false);
   };
@@ -258,6 +265,7 @@ function ConciliaProApp() {
       setStep(3);
       setShowHistoryModal(false);
       setIsSavedToCloud(true);
+      setCloudError('');
     } catch(e) {
       alert("Erro ao carregar o detalhamento.");
     }
@@ -287,13 +295,10 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE E CORREÇÃO DO "BYPASS"
+  // 2. LINKS DO STRIPE
   // ====================================================================
   const handleStripePayment = (type) => {
-    // Alerta instruindo o usuário a aguardar
-    alert("Como estamos num ambiente de testes, o pagamento será feito numa nova janela.\n\nApós o pagamento, atualize o site para que a sua conta seja liberada!");
-    
-    // Fecha o modal de preços para ele não ficar preso no ecrã
+    alert("Vai ser redirecionado para o ambiente seguro do Stripe. Após concluir o pagamento, retorne aqui e aguarde a liberação do sistema.");
     setShowPricingModal(false);
     const emailParam = user && user.email ? `?prefilled_email=${encodeURIComponent(user.email)}` : '';
 
@@ -302,9 +307,6 @@ function ConciliaProApp() {
     } else if (type === 'premium') {
       window.open(`https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401${emailParam}`, '_blank');
     }
-    
-    // ATENÇÃO: A linha que deixava avançar para o Step 2 foi REMOVIDA DAQUI! 
-    // Agora o sistema obriga-o a ter os créditos na base de dados para passar.
   };
 
   const processExcel = (file, setRawData, setCols, setMapping, setTemplateFound) => {
@@ -382,6 +384,10 @@ function ConciliaProApp() {
 
   const runReconciliation = () => {
     if (!bankMapping.date || !bankMapping.value || !sysMapping.date || !sysMapping.value) { alert("Por favor, selecione as colunas de Data e Valor."); return; }
+    
+    setCloudError(''); // Limpar erros antigos
+    setIsSavedToCloud(false);
+    
     try {
       const savedTemplates = JSON.parse(localStorage.getItem('conciliador_templates') || '{}');
       if (bankCols.length > 0) savedTemplates[bankCols.join('||')] = bankMapping;
@@ -438,7 +444,7 @@ function ConciliaProApp() {
           const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
           setDoc(profileRef, { freeCredits: newFree, avulsoCredits: newAvulso }, { merge: true });
         }
-        saveToCloud(finalResults);
+        saveToCloud(finalResults); // Tenta gravar na nuvem
       }
       setHasSavedSession(true); 
     } catch(e){}
@@ -448,6 +454,7 @@ function ConciliaProApp() {
 
   const resetApp = () => {
     setBankFile(null); setSysFile(null); setBankDataRaw([]); setSysDataRaw([]); setFilterStart(''); setFilterEnd('');
+    setCloudError('');
     try { localStorage.removeItem('conciliador_data'); } catch(e){}
     setHasSavedSession(false); setIsSavedToCloud(false); setStep(1);
   };
@@ -623,10 +630,18 @@ function ConciliaProApp() {
 
           {step === 3 && (
             <div className="animate-fade-in">
-              {isRealUser && isSavedToCloud && (
+            
+              {/* === RADARES DE ERRO/SUCESSO DO FIREBASE === */}
+              {isRealUser && isSavedToCloud && !cloudError && (
                 <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center justify-between border border-blue-200 dark:border-blue-800/50">
                   <div className="flex items-center gap-2"><Cloud size={18} /> Salvo automaticamente na nuvem</div>
                   <button onClick={resetApp} className="text-blue-600 hover:underline font-bold">Nova Conciliação</button>
+                </div>
+              )}
+              
+              {cloudError && (
+                <div className="mb-4 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300 p-3 rounded-lg text-sm font-semibold flex items-center gap-2 border border-red-200 dark:border-red-800/50">
+                  <AlertCircle size={18} className="flex-shrink-0" /> {cloudError}
                 </div>
               )}
 
@@ -758,7 +773,63 @@ function ConciliaProApp() {
           </div>
         )}
 
-        {/* Modal de Autenticação com Mensagem de Sucesso */}
+        {/* Modal de Histórico */}
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[80vh] flex flex-col relative">
+              <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg text-blue-600 dark:text-blue-400"><History size={24} /></div>
+                <h2 className="text-2xl font-bold dark:text-white">Meu Histórico</h2>
+              </div>
+              <p className="text-xs text-slate-500 mb-6 ml-12">Por segurança e desempenho, mantemos apenas os últimos 10 relatórios salvos.</p>
+
+              {historyError && (
+                <div className="mb-4 bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300 p-3 rounded-lg text-sm font-semibold border border-red-200 dark:border-red-800/50">
+                  <span className="font-bold">Aviso:</span> {historyError}
+                </div>
+              )}
+
+              <div className="overflow-y-auto flex-1 pr-2">
+                {loadingHistory ? (
+                  <div className="text-center py-10 text-slate-500">A carregar dados da nuvem...</div>
+                ) : userHistory.length === 0 ? (
+                  <div className="text-center py-10">
+                    <History size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                    <p className="text-slate-500 dark:text-slate-400">Ainda não tem conciliações salvas na nuvem.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {userHistory.map((rec) => {
+                      const d = new Date(rec.date);
+                      const isBalance = Math.abs(rec.difference) < 0.01;
+                      return (
+                        <div key={rec.id} onClick={() => loadHistoricalReconciliation(rec)} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition shadow-sm hover:shadow" title="Clique para ver os detalhes">
+                          <div>
+                            <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                              {d.toLocaleDateString('pt-BR')} às {d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                              {rec.fullData && <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">Ver Detalhes</span>}
+                            </p>
+                            <div className="flex gap-4 mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500"/> {rec.matchedCount} Iguais</span>
+                              <span className="flex items-center gap-1"><AlertCircle size={12} className="text-orange-500"/> {rec.pendenciesCount} Pendências</span>
+                            </div>
+                          </div>
+                          <div className="flex gap-6 sm:text-right">
+                            <div><p className="text-xs uppercase font-bold text-slate-400 mb-1">Banco / Sistema</p><p className="text-sm font-medium">{formatMoney(rec.bankTotal)}</p></div>
+                            <div className={`p-2 rounded-lg ${isBalance ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'}`}><p className="text-xs uppercase font-bold mb-1 opacity-80">Diferença</p><p className="font-bold">{formatMoney(rec.difference)}</p></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Autenticação */}
         {showAuthWall && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
             <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
@@ -767,7 +838,6 @@ function ConciliaProApp() {
               <h2 className="text-2xl font-bold text-center mb-2 dark:text-white">{authMode === 'register' ? 'Crie a sua Conta' : 'Bem-vindo de volta!'}</h2>
               <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-sm">{authMode === 'register' ? 'Para ganhar 5 conciliações gratuitas e guardar os relatórios, crie uma conta.' : 'Faça login para continuar as suas conciliações.'}</p>
 
-              {/* Mensagens de Sucesso / Erro */}
               {authSuccessMsg && <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm rounded-lg border border-green-200 dark:border-green-800/50 flex justify-center items-center font-bold gap-2"><CheckCircle size={18}/> {authSuccessMsg}</div>}
               {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg border border-red-200 dark:border-red-800/50">{authError}</div>}
 
