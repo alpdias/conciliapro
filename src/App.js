@@ -113,8 +113,14 @@ function ConciliaProApp() {
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsRealUser(currentUser && !currentUser.isAnonymous);
+      // Se não tem email verificado, não o consideramos "RealUser" válido para o sistema
+      if (currentUser && !currentUser.isAnonymous && !currentUser.emailVerified) {
+        setUser(currentUser);
+        setIsRealUser(false);
+      } else {
+        setUser(currentUser);
+        setIsRealUser(currentUser && !currentUser.isAnonymous);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -170,6 +176,7 @@ function ConciliaProApp() {
     } catch (e) {}
   }, []);
 
+  // === NOVA LÓGICA DE LOGIN COM VERIFICAÇÃO OBRIGATÓRIA ===
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -177,24 +184,42 @@ function ConciliaProApp() {
     setAuthLoading(true);
     try {
       if (authMode === 'register') {
+        // 1. Cria a conta
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         
-        // ENVIO DO EMAIL DE VERIFICAÇÃO AUTOMÁTICO
+        // 2. Envia o e-mail de verificação
         try {
           await sendEmailVerification(userCredential.user);
         } catch (emailErr) {
           console.error("Erro ao enviar email de verificação", emailErr);
         }
 
-        setAuthSuccessMsg('Conta criada! Verifique a sua caixa de entrada para confirmar o e-mail. A preparar ambiente...');
+        // 3. EXPULSA O UTILIZADOR IMEDIATAMENTE (Logout forçado)
+        await signOut(auth);
+
+        // 4. Mostra a mensagem e obriga-o a ir ao email
+        setAuthSuccessMsg('Conta criada! Verifique o seu e-mail (e a pasta SPAM) para confirmar. Depois, faça Login.');
+        
         setTimeout(() => {
+          setAuthMode('login'); // Muda o ecrã para Login automaticamente
           setAuthLoading(false);
-          setShowAuthWall(false);
           setAuthSuccessMsg('');
-          handleNextToMapping();
-        }, 3000);
+          // NÃO fecha a janela, obriga-o a confirmar e depois entrar
+        }, 5000);
+
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        // FLUXO DE LOGIN
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        
+        // Verifica se clicou no link do e-mail
+        if (!userCredential.user.emailVerified) {
+          await signOut(auth); // Expulsa novamente
+          setAuthError('Acesso negado: Você precisa de confirmar o seu e-mail primeiro. Verifique a sua caixa de entrada e a pasta de SPAM.');
+          setAuthLoading(false);
+          return; // Aborta e não deixa entrar
+        }
+
+        // Se estiver verificado, entra normal!
         setAuthLoading(false);
         setShowAuthWall(false);
         handleNextToMapping();
@@ -203,7 +228,7 @@ function ConciliaProApp() {
       setAuthLoading(false);
       if (error.code === 'auth/email-already-in-use') setAuthError('Este e-mail já está registado. Faça login.');
       else if (error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') setAuthError('Credenciais incorretas.');
-      else setAuthError('Erro na autenticação. Verifique os dados.');
+      else setAuthError('Erro na autenticação. Verifique os dados e tente novamente.');
     }
   };
 
@@ -296,7 +321,7 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE (PRODUÇÃO)
+  // 2. LINKS DO STRIPE
   // ====================================================================
   const handleStripePayment = (type) => {
     setShowPricingModal(false);
@@ -585,7 +610,6 @@ function ConciliaProApp() {
               )}
               <div className="grid md:grid-cols-2 gap-6">
                 
-                {/* CORREÇÃO DO CONTAINER DE FICHEIRO 1 */}
                 <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-4 text-blue-600 dark:text-blue-400"><FileSpreadsheet size={24} /><h2 className="text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-100">1. Extrato Bancário</h2></div>
                   <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-2 overflow-hidden">
@@ -600,7 +624,6 @@ function ConciliaProApp() {
                   {bankDataRaw.length > 0 && <p className="mt-2 text-xs sm:text-sm text-green-600">✓ {bankDataRaw.length} linhas lidas</p>}
                 </div>
                 
-                {/* CORREÇÃO DO CONTAINER DE FICHEIRO 2 */}
                 <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-4 text-purple-600 dark:text-purple-400"><FileSpreadsheet size={24} /><h2 className="text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-100">2. Controle / Sistema</h2></div>
                   <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-2 overflow-hidden">
