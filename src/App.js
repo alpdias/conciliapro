@@ -65,7 +65,7 @@ function ConciliaProApp() {
   const [isRealUser, setIsRealUser] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
-  const [authMode, setAuthMode] = useState('register');
+  const [authMode, setAuthMode] = useState('login'); // CORREÇÃO: Abre no ecrã de Login por padrão
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
@@ -113,7 +113,6 @@ function ConciliaProApp() {
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // Se não tem email verificado, não o consideramos "RealUser" válido para o sistema
       if (currentUser && !currentUser.isAnonymous && !currentUser.emailVerified) {
         setUser(currentUser);
         setIsRealUser(false);
@@ -176,7 +175,6 @@ function ConciliaProApp() {
     } catch (e) {}
   }, []);
 
-  // === NOVA LÓGICA DE LOGIN COM VERIFICAÇÃO OBRIGATÓRIA ===
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -184,45 +182,43 @@ function ConciliaProApp() {
     setAuthLoading(true);
     try {
       if (authMode === 'register') {
-        // 1. Cria a conta
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         
-        // 2. Envia o e-mail de verificação
         try {
           await sendEmailVerification(userCredential.user);
         } catch (emailErr) {
           console.error("Erro ao enviar email de verificação", emailErr);
         }
 
-        // 3. EXPULSA O UTILIZADOR IMEDIATAMENTE (Logout forçado)
         await signOut(auth);
 
-        // 4. Mostra a mensagem e obriga-o a ir ao email
         setAuthSuccessMsg('Conta criada! Verifique o seu e-mail (e a pasta SPAM) para confirmar. Depois, faça Login.');
         
         setTimeout(() => {
-          setAuthMode('login'); // Muda o ecrã para Login automaticamente
+          setAuthMode('login');
           setAuthLoading(false);
           setAuthSuccessMsg('');
-          // NÃO fecha a janela, obriga-o a confirmar e depois entrar
         }, 5000);
 
       } else {
-        // FLUXO DE LOGIN
+        // CORREÇÃO DO DUPLO CLIQUE NO LOGIN
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         
-        // Verifica se clicou no link do e-mail
         if (!userCredential.user.emailVerified) {
-          await signOut(auth); // Expulsa novamente
+          await signOut(auth);
           setAuthError('Acesso negado: Você precisa de confirmar o seu e-mail primeiro. Verifique a sua caixa de entrada e a pasta de SPAM.');
           setAuthLoading(false);
-          return; // Aborta e não deixa entrar
+          return;
         }
 
-        // Se estiver verificado, entra normal!
-        setAuthLoading(false);
-        setShowAuthWall(false);
-        handleNextToMapping();
+        setAuthSuccessMsg('Login efetuado com sucesso! A preparar ambiente...');
+        
+        // Aguarda 1,5s para o Firebase carregar os créditos e depois fecha a janela
+        setTimeout(() => {
+          setAuthLoading(false);
+          setShowAuthWall(false);
+          setAuthSuccessMsg('');
+        }, 1500);
       }
     } catch (error) {
       setAuthLoading(false);
@@ -321,7 +317,7 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE
+  // 2. LINKS DO STRIPE (PRODUÇÃO)
   // ====================================================================
   const handleStripePayment = (type) => {
     setShowPricingModal(false);
@@ -582,7 +578,7 @@ function ConciliaProApp() {
               <button onClick={handleLogout} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition" title="Sair"><LogOut size={16} /></button>
             </div>
           ) : (
-            <button onClick={() => setShowAuthWall(true)} className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline px-2 sm:px-4 py-2">Fazer Login</button>
+            <button onClick={() => { setAuthMode('login'); setShowAuthWall(true); }} className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline px-2 sm:px-4 py-2">Fazer Login</button>
           )}
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 transition" title="Alternar tema">
             {darkMode ? <Sun size={16} /> : <Moon size={16} />}
