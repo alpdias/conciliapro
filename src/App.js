@@ -8,11 +8,11 @@ import {
 
 // === IMPORTAÇÕES DO FIREBASE ===
 import { initializeApp } from "firebase/app";
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendEmailVerification } from "firebase/auth";
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 
 // ====================================================================
-// 1. CHAVES DO FIREBASE (Já com os seus dados)
+// 1. CHAVES DO FIREBASE
 // ====================================================================
 let firebaseConfig = {
   apiKey: "AIzaSyBiKrn-qzV-0d4sdWpizVjqKZJNRCZpoFo",
@@ -86,7 +86,6 @@ function ConciliaProApp() {
     bankTotal: 0, sysTotal: 0, difference: 0 
   });
 
-  // Função definida no topo para evitar o erro "Can't find variable"
   const restoreSession = () => {
     try {
       const saved = localStorage.getItem('conciliador_data');
@@ -178,14 +177,22 @@ function ConciliaProApp() {
     setAuthLoading(true);
     try {
       if (authMode === 'register') {
-        await createUserWithEmailAndPassword(auth, email, password);
-        setAuthSuccessMsg('Conta criada com sucesso! A preparar ambiente...');
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        
+        // ENVIO DO EMAIL DE VERIFICAÇÃO AUTOMÁTICO
+        try {
+          await sendEmailVerification(userCredential.user);
+        } catch (emailErr) {
+          console.error("Erro ao enviar email de verificação", emailErr);
+        }
+
+        setAuthSuccessMsg('Conta criada! Verifique a sua caixa de entrada para confirmar o e-mail. A preparar ambiente...');
         setTimeout(() => {
           setAuthLoading(false);
           setShowAuthWall(false);
           setAuthSuccessMsg('');
           handleNextToMapping();
-        }, 2000);
+        }, 3000);
       } else {
         await signInWithEmailAndPassword(auth, email, password);
         setAuthLoading(false);
@@ -223,6 +230,17 @@ function ConciliaProApp() {
         fullData: JSON.stringify(dataToSave)
       });
       setIsSavedToCloud(true);
+
+      const snapshot = await getDocs(recRef);
+      if (snapshot.docs.length > 10) {
+        const docsArray = snapshot.docs.map(d => ({ id: d.id, date: d.data().date }));
+        docsArray.sort((a, b) => new Date(b.date) - new Date(a.date));
+        const docsToDelete = docsArray.slice(10);
+        for (const docItem of docsToDelete) {
+          const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'reconciliations', docItem.id);
+          await deleteDoc(docRef);
+        }
+      }
     } catch (e) {
       console.error("Erro ao salvar", e);
     }
@@ -278,16 +296,16 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE (Os seus oficiais)
+  // 2. LINKS DO STRIPE (PRODUÇÃO)
   // ====================================================================
   const handleStripePayment = (type) => {
     setShowPricingModal(false);
     const emailParam = user && user.email ? `?prefilled_email=${encodeURIComponent(user.email)}` : '';
 
     if (type === 'avulso') {
-      window.open(`https://buy.stripe.com/test_28EdR10XP3mhgL9dkU7g400${emailParam}`, '_blank');
+      window.open(`https://buy.stripe.com/28E7sNe6gfdEbtabEw7ss01${emailParam}`, '_blank');
     } else if (type === 'premium') {
-      window.open(`https://buy.stripe.com/test_28EeV58qh4qlamLa8I7g401${emailParam}`, '_blank');
+      window.open(`https://buy.stripe.com/3cIaEZfak9Tk0OwgYQ7ss00${emailParam}`, '_blank');
     }
   };
 
@@ -547,7 +565,7 @@ function ConciliaProApp() {
         </div>
 
         {/* ÁREA DA FERRAMENTA */}
-        <div className="max-w-5xl mx-auto pt-24 px-4 sm:px-6 pb-12">
+        <div className="max-w-5xl mx-auto pt-24 px-4 sm:px-6 pb-12 overflow-x-hidden">
           
           <header className="mb-10 flex flex-col items-center text-center">
             <div className="flex items-center justify-center gap-3">
@@ -566,18 +584,32 @@ function ConciliaProApp() {
                 </div>
               )}
               <div className="grid md:grid-cols-2 gap-6">
+                
+                {/* CORREÇÃO DO CONTAINER DE FICHEIRO 1 */}
                 <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-4 text-blue-600 dark:text-blue-400"><FileSpreadsheet size={24} /><h2 className="text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-100">1. Extrato Bancário</h2></div>
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center"><Upload className="w-8 h-8 mb-2 text-slate-400" /><p className="text-xs sm:text-sm text-slate-500 font-medium truncate w-full">{bankFile ? bankFile.name : 'Selecione o ficheiro do Banco'}</p></div>
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-2 overflow-hidden">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6 w-full min-w-0">
+                      <Upload className="w-8 h-8 mb-2 text-slate-400 flex-shrink-0" />
+                      <p className="text-xs sm:text-sm text-slate-500 font-medium truncate w-full text-center">
+                        {bankFile ? bankFile.name : 'Selecione o ficheiro do Banco'}
+                      </p>
+                    </div>
                     <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => setBankFile(e.target.files[0])} />
                   </label>
                   {bankDataRaw.length > 0 && <p className="mt-2 text-xs sm:text-sm text-green-600">✓ {bankDataRaw.length} linhas lidas</p>}
                 </div>
+                
+                {/* CORREÇÃO DO CONTAINER DE FICHEIRO 2 */}
                 <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-4 text-purple-600 dark:text-purple-400"><FileSpreadsheet size={24} /><h2 className="text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-100">2. Controle / Sistema</h2></div>
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center"><Upload className="w-8 h-8 mb-2 text-slate-400" /><p className="text-xs sm:text-sm text-slate-500 font-medium truncate w-full">{sysFile ? sysFile.name : 'Selecione o ficheiro do ERP'}</p></div>
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-2 overflow-hidden">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6 w-full min-w-0">
+                      <Upload className="w-8 h-8 mb-2 text-slate-400 flex-shrink-0" />
+                      <p className="text-xs sm:text-sm text-slate-500 font-medium truncate w-full text-center">
+                        {sysFile ? sysFile.name : 'Selecione o ficheiro do ERP'}
+                      </p>
+                    </div>
                     <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => setSysFile(e.target.files[0])} />
                   </label>
                   {sysDataRaw.length > 0 && <p className="mt-2 text-xs sm:text-sm text-green-600">✓ {sysDataRaw.length} linhas lidas</p>}
