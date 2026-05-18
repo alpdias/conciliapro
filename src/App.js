@@ -66,7 +66,7 @@ function ConciliaProApp() {
   const [showAuthWall, setShowAuthWall] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
   
-  // LOGIN COMO PADRÃO A PEDIDO DO UTILIZADOR
+  // O MODO LOGIN APARECE PRIMEIRO POR PADRÃO
   const [authMode, setAuthMode] = useState('login'); 
   
   const [email, setEmail] = useState('');
@@ -178,6 +178,7 @@ function ConciliaProApp() {
     } catch (e) {}
   }, []);
 
+  // === FLUXO DE LOGIN/REGISTO CORRIGIDO ===
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -199,29 +200,28 @@ function ConciliaProApp() {
         setAuthSuccessMsg('Conta criada! Verifique o seu e-mail (e a pasta SPAM) para confirmar. Depois, faça Login.');
         
         setTimeout(() => {
-          setAuthMode('login');
+          setAuthMode('login'); // Passa automaticamente para a aba de Login
           setAuthLoading(false);
           setAuthSuccessMsg('');
         }, 5000);
 
       } else {
-        // FLUXO DE LOGIN COM CORREÇÃO DE DUPLO CLIQUE
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         
         if (!userCredential.user.emailVerified) {
           await signOut(auth);
-          setAuthError('Acesso negado: Você precisa confirmar o e-mail primeiro. Verifique a sua caixa de entrada e SPAM.');
+          setAuthError('Acesso negado: Você precisa de confirmar o e-mail primeiro. Verifique a sua caixa de entrada e SPAM.');
           setAuthLoading(false);
           return;
         }
 
-        setAuthSuccessMsg('Login efetuado com sucesso! A preparar ambiente...');
+        setAuthSuccessMsg('Login efetuado com sucesso! A carregar dados...');
         
+        // Aguarda 1,5s para os dados chegarem, e depois FECHA apenas a janela (não avança de forma forçada).
         setTimeout(() => {
           setAuthLoading(false);
           setShowAuthWall(false);
           setAuthSuccessMsg('');
-          handleNextToMapping(); // <- ESTA LINHA FALTAVA! AGORA ELE AVANÇA SOZINHO!
         }, 1500);
       }
     } catch (error) {
@@ -310,7 +310,11 @@ function ConciliaProApp() {
   const handleNextToMapping = () => {
     if (!isRealUser) {
       const usages = parseInt(localStorage.getItem('concilia_usages') || '0');
-      if (usages >= 1) { setShowAuthWall(true); return; }
+      if (usages >= 1) { 
+        setAuthMode('login'); // Garante que abre no Login ao ser bloqueado
+        setShowAuthWall(true); 
+        return; 
+      }
     } else {
       if (userPlan !== 'premium' && freeCredits <= 0 && avulsoCredits <= 0) { 
         setShowPricingModal(true); 
@@ -610,7 +614,6 @@ function ConciliaProApp() {
               )}
               <div className="grid md:grid-cols-2 gap-6">
                 
-                {/* CORREÇÃO DO NOME DE FICHEIRO GRANDE (Deformação) */}
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-4 text-blue-600 dark:text-blue-400"><FileSpreadsheet size={24} /><h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100">1. Extrato Bancário</h2></div>
                   <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-4 overflow-hidden">
@@ -798,7 +801,7 @@ function ConciliaProApp() {
                   </div>
                   <button onClick={() => handleStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso</button>
                 </div>
-                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-6 border-2 border-blue-50 flex flex-col h-full shadow-xl relative transform md:-translate-y-2">
+                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-6 border-2 border-blue-500 flex flex-col h-full shadow-xl relative transform md:-translate-y-2">
                   <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full flex items-center gap-1"><Crown size={12} /> Mais Popular</div>
                   <div className="flex-1">
                     <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><Zap size={20} className="text-yellow-500" /> Assinatura Premium</h3>
