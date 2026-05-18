@@ -65,7 +65,10 @@ function ConciliaProApp() {
   const [isRealUser, setIsRealUser] = useState(false);
   const [showAuthWall, setShowAuthWall] = useState(false);
   const [showPricingModal, setShowPricingModal] = useState(false);
-  const [authMode, setAuthMode] = useState('login'); // CORREÇÃO: Abre no ecrã de Login por padrão
+  
+  // LOGIN COMO PADRÃO A PEDIDO DO UTILIZADOR
+  const [authMode, setAuthMode] = useState('login'); 
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
@@ -180,6 +183,7 @@ function ConciliaProApp() {
     setAuthError('');
     setAuthSuccessMsg('');
     setAuthLoading(true);
+    
     try {
       if (authMode === 'register') {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -201,23 +205,23 @@ function ConciliaProApp() {
         }, 5000);
 
       } else {
-        // CORREÇÃO DO DUPLO CLIQUE NO LOGIN
+        // FLUXO DE LOGIN COM CORREÇÃO DE DUPLO CLIQUE
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         
         if (!userCredential.user.emailVerified) {
           await signOut(auth);
-          setAuthError('Acesso negado: Você precisa de confirmar o seu e-mail primeiro. Verifique a sua caixa de entrada e a pasta de SPAM.');
+          setAuthError('Acesso negado: Você precisa confirmar o e-mail primeiro. Verifique a sua caixa de entrada e SPAM.');
           setAuthLoading(false);
           return;
         }
 
         setAuthSuccessMsg('Login efetuado com sucesso! A preparar ambiente...');
         
-        // Aguarda 1,5s para o Firebase carregar os créditos e depois fecha a janela
         setTimeout(() => {
           setAuthLoading(false);
           setShowAuthWall(false);
           setAuthSuccessMsg('');
+          handleNextToMapping(); // <- ESTA LINHA FALTAVA! AGORA ELE AVANÇA SOZINHO!
         }, 1500);
       }
     } catch (error) {
@@ -317,7 +321,7 @@ function ConciliaProApp() {
   };
 
   // ====================================================================
-  // 2. LINKS DO STRIPE (PRODUÇÃO)
+  // 2. LINKS DO STRIPE (OFICIAIS DE PRODUÇÃO DO UTILIZADOR)
   // ====================================================================
   const handleStripePayment = (type) => {
     setShowPricingModal(false);
@@ -543,10 +547,10 @@ function ConciliaProApp() {
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans transition-colors duration-200 relative">
         
         {/* NAVEGAÇÃO SUPERIOR */}
-        <div className="absolute top-4 right-4 flex items-center gap-2 z-40">
+        <div className="absolute top-6 right-6 flex items-center gap-3 z-40">
           {isRealUser ? (
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className="text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:flex items-center gap-1">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 hidden md:flex items-center gap-1">
                 Olá, {user?.email?.split('@')[0]}
                 {userPlan === 'premium' && <span className="ml-2 bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">Premium</span>}
                 {userPlan !== 'premium' && freeCredits > 0 && <span className="ml-2 bg-green-100 text-green-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase flex items-center gap-1"><CheckCircle size={10}/> {freeCredits} Grátis</span>}
@@ -554,13 +558,13 @@ function ConciliaProApp() {
               </span>
               
               <div className="relative group flex items-center">
-                <button onClick={openHistory} className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm text-xs sm:text-sm">
+                <button onClick={openHistory} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-semibold hover:bg-blue-200 dark:hover:bg-blue-800/60 transition shadow-sm">
                   <History size={16} /> <span className="hidden sm:inline">Histórico</span>
                   {userPlan !== 'premium' && <Lock size={12} className="opacity-60" />}
                 </button>
 
                 {userPlan !== 'premium' && (
-                  <div className="absolute top-full right-0 mt-3 w-56 sm:w-64 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded-xl p-3 sm:p-4 shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50">
+                  <div className="absolute top-full right-0 mt-3 w-64 bg-slate-800 dark:bg-slate-700 text-white text-xs rounded-xl p-4 shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50">
                     <div className="absolute -top-1.5 right-6 w-3 h-3 bg-slate-800 dark:bg-slate-700 transform rotate-45"></div>
                     <div className="relative z-10">
                       <div className="flex items-center gap-2 mb-2">
@@ -575,103 +579,104 @@ function ConciliaProApp() {
                 )}
               </div>
 
-              <button onClick={handleLogout} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition" title="Sair"><LogOut size={16} /></button>
+              <button onClick={handleLogout} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 dark:hover:text-red-400 transition" title="Sair"><LogOut size={18} /></button>
             </div>
           ) : (
-            <button onClick={() => { setAuthMode('login'); setShowAuthWall(true); }} className="text-xs sm:text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline px-2 sm:px-4 py-2">Fazer Login</button>
+            <button onClick={() => { setAuthMode('login'); setShowAuthWall(true); }} className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline px-4 py-2">Fazer Login</button>
           )}
           <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 transition" title="Alternar tema">
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
         </div>
 
         {/* ÁREA DA FERRAMENTA */}
-        <div className="max-w-5xl mx-auto pt-24 px-4 sm:px-6 pb-12 overflow-x-hidden">
+        <div className="max-w-5xl mx-auto pt-24 px-6 pb-12">
           
           <header className="mb-10 flex flex-col items-center text-center">
             <div className="flex items-center justify-center gap-3">
               <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-xl"><Scale className="text-blue-600 dark:text-blue-400" size={32} strokeWidth={2.5} /></div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">Concilia<span className="text-blue-600 dark:text-blue-500">Pro</span></h1>
+              <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight">Concilia<span className="text-blue-600 dark:text-blue-500">Pro</span></h1>
             </div>
-            <p className="text-[10px] sm:text-xs font-bold tracking-[0.2em] text-slate-500 dark:text-slate-400 mt-3 uppercase">Sistema de Conciliação Financeira</p>
+            <p className="text-xs font-bold tracking-[0.2em] text-slate-500 dark:text-slate-400 mt-3 uppercase">Sistema de Conciliação Financeira</p>
           </header>
 
           {step === 1 && (
             <div className="space-y-6 animate-fade-in">
               {hasSavedSession && (
-                <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/50 p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between shadow-sm gap-4">
-                  <div className="flex items-center gap-3 text-blue-800 dark:text-blue-300"><Save size={24} /><div><h3 className="font-bold text-sm sm:text-base">Sessão Salva Encontrada</h3><p className="text-xs sm:text-sm opacity-90">Deseja retomar a última conciliação?</p></div></div>
-                  <button onClick={restoreSession} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold transition shadow">Retomar</button>
+                <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/50 p-4 rounded-xl flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-3 text-blue-800 dark:text-blue-300"><Save size={24} /><div><h3 className="font-bold">Sessão Salva Encontrada</h3><p className="text-sm opacity-90">Deseja retomar a última conciliação?</p></div></div>
+                  <button onClick={restoreSession} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold transition shadow">Retomar</button>
                 </div>
               )}
               <div className="grid md:grid-cols-2 gap-6">
                 
-                <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-                  <div className="flex items-center gap-2 mb-4 text-blue-600 dark:text-blue-400"><FileSpreadsheet size={24} /><h2 className="text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-100">1. Extrato Bancário</h2></div>
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-2 overflow-hidden">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6 w-full min-w-0">
+                {/* CORREÇÃO DO NOME DE FICHEIRO GRANDE (Deformação) */}
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-2 mb-4 text-blue-600 dark:text-blue-400"><FileSpreadsheet size={24} /><h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100">1. Extrato Bancário</h2></div>
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-4 overflow-hidden">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6 w-full">
                       <Upload className="w-8 h-8 mb-2 text-slate-400 flex-shrink-0" />
-                      <p className="text-xs sm:text-sm text-slate-500 font-medium truncate w-full text-center">
+                      <p className="text-sm text-slate-500 font-medium truncate w-full text-center">
                         {bankFile ? bankFile.name : 'Selecione o ficheiro do Banco'}
                       </p>
                     </div>
                     <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => setBankFile(e.target.files[0])} />
                   </label>
-                  {bankDataRaw.length > 0 && <p className="mt-2 text-xs sm:text-sm text-green-600">✓ {bankDataRaw.length} linhas lidas</p>}
+                  {bankDataRaw.length > 0 && <p className="mt-2 text-sm text-green-600">✓ {bankDataRaw.length} linhas lidas</p>}
                 </div>
                 
-                <div className="bg-white dark:bg-slate-800 p-5 sm:p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
-                  <div className="flex items-center gap-2 mb-4 text-purple-600 dark:text-purple-400"><FileSpreadsheet size={24} /><h2 className="text-lg sm:text-xl font-semibold text-slate-800 dark:text-slate-100">2. Controle / Sistema</h2></div>
-                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-2 overflow-hidden">
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6 w-full min-w-0">
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-2 mb-4 text-purple-600 dark:text-purple-400"><FileSpreadsheet size={24} /><h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100">2. Controle / Sistema</h2></div>
+                  <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 dark:border-slate-600 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition px-4 overflow-hidden">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6 w-full">
                       <Upload className="w-8 h-8 mb-2 text-slate-400 flex-shrink-0" />
-                      <p className="text-xs sm:text-sm text-slate-500 font-medium truncate w-full text-center">
+                      <p className="text-sm text-slate-500 font-medium truncate w-full text-center">
                         {sysFile ? sysFile.name : 'Selecione o ficheiro do ERP'}
                       </p>
                     </div>
                     <input type="file" className="hidden" accept=".xlsx, .xls" onChange={(e) => setSysFile(e.target.files[0])} />
                   </label>
-                  {sysDataRaw.length > 0 && <p className="mt-2 text-xs sm:text-sm text-green-600">✓ {sysDataRaw.length} linhas lidas</p>}
+                  {sysDataRaw.length > 0 && <p className="mt-2 text-sm text-green-600">✓ {sysDataRaw.length} linhas lidas</p>}
                 </div>
+                
               </div>
               <div className="flex justify-center mt-8">
-                <button onClick={handleNextToMapping} disabled={!bankFile || !sysFile || !isXlsxLoaded} className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 px-8 rounded-lg flex items-center justify-center gap-2 transition shadow-lg">Continuar <ArrowRight size={20} /></button>
+                <button onClick={handleNextToMapping} disabled={!bankFile || !sysFile || !isXlsxLoaded} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 px-8 rounded-lg flex items-center gap-2 transition shadow-lg">Continuar <ArrowRight size={20} /></button>
               </div>
             </div>
           )}
 
           {step === 2 && (
-            <div className="bg-white dark:bg-slate-800 p-5 sm:p-8 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors animate-fade-in">
-              <h2 className="text-xl sm:text-2xl font-bold mb-6 dark:text-white">Confirme as Colunas</h2>
-              <div className="grid md:grid-cols-2 gap-8 sm:gap-12 mb-8">
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 transition-colors animate-fade-in">
+              <h2 className="text-2xl font-bold mb-6 dark:text-white">Confirme as Colunas</h2>
+              <div className="grid md:grid-cols-2 gap-12 mb-8">
                 <div>
-                  <h3 className="text-base sm:text-lg font-semibold text-blue-700 dark:text-blue-400 border-b dark:border-slate-700 pb-2 mb-4 flex items-center justify-between"><span>Banco</span>{bankTemplateFound && <span className="text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full flex items-center gap-1"><Sparkles size={12}/> Automático</span>}</h3>
+                  <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-400 border-b dark:border-slate-700 pb-2 mb-4 flex items-center justify-between"><span>Banco</span>{bankTemplateFound && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full flex items-center gap-1"><Sparkles size={12}/> Automático</span>}</h3>
                   {['date', 'desc', 'value'].map((field) => (
                     <div key={`bank_${field}`} className="mb-3">
-                      <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 uppercase mb-1">{field === 'date' ? 'Data' : field === 'desc' ? 'Descrição' : 'Valor'}</label>
-                      <select className="w-full border rounded p-2 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-sm" value={bankMapping[field]} onChange={(e) => setBankMapping({...bankMapping, [field]: e.target.value})}><option value="">Selecione...</option>{bankCols.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">{field === 'date' ? 'Data' : field === 'desc' ? 'Descrição' : 'Valor'}</label>
+                      <select className="w-full border rounded p-2 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200" value={bankMapping[field]} onChange={(e) => setBankMapping({...bankMapping, [field]: e.target.value})}><option value="">Selecione...</option>{bankCols.map(c => <option key={c} value={c}>{c}</option>)}</select>
                     </div>
                   ))}
                   {renderPreviewTable(bankDataRaw, bankMapping)}
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-semibold text-purple-700 dark:text-purple-400 border-b dark:border-slate-700 pb-2 mb-4 flex items-center justify-between"><span>Sistema</span>{sysTemplateFound && <span className="text-[10px] sm:text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full flex items-center gap-1"><Sparkles size={12}/> Automático</span>}</h3>
+                  <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-400 border-b dark:border-slate-700 pb-2 mb-4 flex items-center justify-between"><span>Sistema</span>{sysTemplateFound && <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full flex items-center gap-1"><Sparkles size={12}/> Automático</span>}</h3>
                   {['date', 'desc', 'value'].map((field) => (
                     <div key={`sys_${field}`} className="mb-3">
-                      <label className="block text-[10px] sm:text-xs font-semibold text-slate-500 uppercase mb-1">{field === 'date' ? 'Data' : field === 'desc' ? 'Descrição' : 'Valor'}</label>
-                      <select className="w-full border rounded p-2 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-sm" value={sysMapping[field]} onChange={(e) => setSysMapping({...sysMapping, [field]: e.target.value})}><option value="">Selecione...</option>{sysCols.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">{field === 'date' ? 'Data' : field === 'desc' ? 'Descrição' : 'Valor'}</label>
+                      <select className="w-full border rounded p-2 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200" value={sysMapping[field]} onChange={(e) => setSysMapping({...sysMapping, [field]: e.target.value})}><option value="">Selecione...</option>{sysCols.map(c => <option key={c} value={c}>{c}</option>)}</select>
                     </div>
                   ))}
                   {renderPreviewTable(sysDataRaw, sysMapping)}
                 </div>
               </div>
               <div className="bg-slate-100 dark:bg-slate-800/50 p-4 rounded-lg mb-8 border border-slate-200 dark:border-slate-700">
-                <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={ignoreSigns} onChange={(e) => setIgnoreSigns(e.target.checked)} /><div><p className="text-sm sm:text-base font-semibold">Ignorar Sinais (+/-)</p><p className="text-xs sm:text-sm opacity-70">Para quando os ficheiros têm sinais opostos para o mesmo tipo de transação.</p></div></label>
+                <label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" className="w-5 h-5 text-blue-600 rounded" checked={ignoreSigns} onChange={(e) => setIgnoreSigns(e.target.checked)} /><div><p className="font-semibold">Ignorar Sinais (+/-)</p><p className="text-sm opacity-70">Para quando os ficheiros têm sinais opostos para o mesmo tipo de transação.</p></div></label>
               </div>
-              
-              <div className="flex flex-col-reverse sm:flex-row items-center justify-between border-t border-slate-200 dark:border-slate-700 pt-6 gap-4">
-                <button onClick={() => setStep(1)} className="w-full sm:w-auto text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-medium px-4 py-3 sm:py-2 text-center">Voltar</button>
-                <button onClick={runReconciliation} className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-8 rounded-lg flex items-center justify-center gap-2 shadow-md"><CheckCircle size={20} /> Processar</button>
+              <div className="flex items-center justify-center border-t border-slate-200 dark:border-slate-700 pt-6 relative">
+                <button onClick={() => setStep(1)} className="absolute left-0 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-medium px-4 py-2">Voltar</button>
+                <button onClick={runReconciliation} className="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-8 rounded-lg flex items-center gap-2 shadow-md"><CheckCircle size={20} /> Processar</button>
               </div>
             </div>
           )}
@@ -679,62 +684,58 @@ function ConciliaProApp() {
           {step === 3 && (
             <div className="animate-fade-in">
               {isRealUser && isSavedToCloud && (
-                <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex flex-col sm:flex-row items-center justify-between border border-blue-200 dark:border-blue-800/50 gap-2">
+                <div className="mb-4 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 p-3 rounded-lg text-sm font-semibold flex items-center justify-between border border-blue-200 dark:border-blue-800/50">
                   <div className="flex items-center gap-2"><Cloud size={18} /> Salvo automaticamente na nuvem</div>
                   <button onClick={resetApp} className="text-blue-600 hover:underline font-bold">Nova Conciliação</button>
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between items-center"><div><p className="text-slate-500 text-xs sm:text-sm">Total Banco</p><h3 className="text-xl sm:text-2xl font-bold truncate max-w-[150px] sm:max-w-none">{formatMoney(results.bankTotal)}</h3></div><div className="bg-blue-50 dark:bg-blue-900/30 p-2 sm:p-3 rounded-full text-blue-600 flex-shrink-0"><Landmark size={24} /></div></div>
-                <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between items-center"><div><p className="text-slate-500 text-xs sm:text-sm">Total Sistema</p><h3 className="text-xl sm:text-2xl font-bold truncate max-w-[150px] sm:max-w-none">{formatMoney(results.sysTotal)}</h3></div><div className="bg-purple-50 dark:bg-purple-900/30 p-2 sm:p-3 rounded-full text-purple-600 flex-shrink-0"><Monitor size={24} /></div></div>
-                <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between items-center"><div><p className="text-slate-500 text-xs sm:text-sm">Diferença</p><h3 className={`text-xl sm:text-2xl font-bold truncate max-w-[150px] sm:max-w-none ${Math.abs(results.difference) < 0.01 ? 'text-green-600' : 'text-orange-600'}`}>{formatMoney(results.difference)}</h3></div><div className={`p-2 sm:p-3 rounded-full flex-shrink-0 ${Math.abs(results.difference) < 0.01 ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}><Calculator size={24} /></div></div>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between"><div><p className="text-slate-500 text-sm">Total Banco</p><h3 className="text-2xl font-bold">{formatMoney(results.bankTotal)}</h3></div><div className="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-full text-blue-600"><Landmark size={24} /></div></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between"><div><p className="text-slate-500 text-sm">Total Sistema</p><h3 className="text-2xl font-bold">{formatMoney(results.sysTotal)}</h3></div><div className="bg-purple-50 dark:bg-purple-900/30 p-3 rounded-full text-purple-600"><Monitor size={24} /></div></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between"><div><p className="text-slate-500 text-sm">Diferença</p><h3 className={`text-2xl font-bold ${Math.abs(results.difference) < 0.01 ? 'text-green-600' : 'text-orange-600'}`}>{formatMoney(results.difference)}</h3></div><div className={`p-3 rounded-full ${Math.abs(results.difference) < 0.01 ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}><Calculator size={24} /></div></div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-                <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-xl border-t-4 border-t-green-500 text-center shadow-sm flex flex-row sm:flex-col items-center justify-between sm:justify-center"><div className="flex items-center gap-3 sm:block"><CheckCircle className="sm:mx-auto text-green-500 sm:mb-2" size={24} /><h3 className="text-xl sm:text-2xl font-bold">{results.matched.length}</h3></div><p className="text-slate-500 text-xs sm:text-sm">Conciliados (100%)</p></div>
-                <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-xl border-t-4 border-t-red-500 text-center shadow-sm flex flex-row sm:flex-col items-center justify-between sm:justify-center"><div className="flex items-center gap-3 sm:block"><AlertCircle className="sm:mx-auto text-red-500 sm:mb-2" size={24} /><h3 className="text-xl sm:text-2xl font-bold">{results.bankOnly.length}</h3></div><p className="text-slate-500 text-xs sm:text-sm">Falta no Sistema</p></div>
-                <div className="bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-xl border-t-4 border-t-orange-500 text-center shadow-sm flex flex-row sm:flex-col items-center justify-between sm:justify-center"><div className="flex items-center gap-3 sm:block"><XCircle className="sm:mx-auto text-orange-500 sm:mb-2" size={24} /><h3 className="text-xl sm:text-2xl font-bold">{results.sysOnly.length}</h3></div><p className="text-slate-500 text-xs sm:text-sm">Sobra no Sistema</p></div>
+              <div className="grid grid-cols-3 gap-4 mb-8">
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border-t-4 border-t-green-500 text-center shadow-sm"><CheckCircle className="mx-auto text-green-500 mb-2" size={28} /><h3 className="text-2xl font-bold">{results.matched.length}</h3><p className="text-slate-500 text-sm">Conciliados (100%)</p></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border-t-4 border-t-red-500 text-center shadow-sm"><AlertCircle className="mx-auto text-red-500 mb-2" size={28} /><h3 className="text-2xl font-bold">{results.bankOnly.length}</h3><p className="text-slate-500 text-sm">Falta no Sistema</p></div>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border-t-4 border-t-orange-500 text-center shadow-sm"><XCircle className="mx-auto text-orange-500 mb-2" size={28} /><h3 className="text-2xl font-bold">{results.sysOnly.length}</h3><p className="text-slate-500 text-sm">Sobra no Sistema</p></div>
               </div>
 
-              <div className="flex border-b border-slate-300 dark:border-slate-700 mb-6 gap-2 sm:gap-6 overflow-x-auto pb-2 custom-scrollbar">
+              <div className="flex border-b border-slate-300 dark:border-slate-700 mb-6 gap-6 overflow-x-auto">
                 {[{id: 'pendencia', icon: SplitSquareHorizontal, label: 'Pendência'}, {id: 'sugestoes', icon: ListChecks, label: 'Sugestões', isPremium: true}, {id: 'banco', icon: Landmark, label: 'Banco'}, {id: 'sistema', icon: Monitor, label: 'Sistema'}].map(tab => (
-                  <button key={tab.id} className={`pb-2 px-2 text-sm sm:text-base font-bold flex items-center gap-1 sm:gap-2 whitespace-nowrap ${activeTab === tab.id ? 'border-b-4 border-blue-600 text-blue-700 dark:text-blue-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`} onClick={() => setActiveTab(tab.id)}>
-                    <tab.icon size={16} className="sm:w-5 sm:h-5" /> {tab.label}
-                    {tab.isPremium && userPlan !== 'premium' && <Lock size={12} className="text-yellow-500 mb-2 sm:mb-3" />}
+                  <button key={tab.id} className={`pb-3 px-2 font-bold flex items-center gap-2 ${activeTab === tab.id ? 'border-b-4 border-blue-600 text-blue-700 dark:text-blue-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`} onClick={() => setActiveTab(tab.id)}>
+                    <tab.icon size={20} /> {tab.label}
+                    {tab.isPremium && userPlan !== 'premium' && <Lock size={12} className="text-yellow-500 mb-3" />}
                   </button>
                 ))}
               </div>
 
-              <div className="bg-white dark:bg-slate-800 p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-                <div className="flex items-center gap-2 text-sm sm:text-base"><Filter size={18} /> <span>Filtrar:</span></div>
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-center">
-                  <input type="date" className="border rounded-md p-1 bg-white dark:bg-slate-900 dark:[color-scheme:dark] text-xs sm:text-sm w-full sm:w-auto" value={filterStart} onChange={(e) => setFilterStart(e.target.value)} />
-                  <span className="text-xs sm:text-sm">até</span>
-                  <input type="date" className="border rounded-md p-1 bg-white dark:bg-slate-900 dark:[color-scheme:dark] text-xs sm:text-sm w-full sm:w-auto" value={filterEnd} onChange={(e) => setFilterEnd(e.target.value)} />
-                </div>
-                {(filterStart || filterEnd) && <button onClick={() => { setFilterStart(''); setFilterEnd(''); }} className="text-blue-600 hover:underline text-sm">Limpar</button>}
+              <div className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 mb-6 flex justify-center gap-4">
+                <div className="flex items-center gap-2"><Filter size={20} /> <span>Filtrar:</span></div>
+                <div className="flex items-center gap-2"><input type="date" className="border rounded-md p-1 bg-white dark:bg-slate-900 dark:[color-scheme:dark]" value={filterStart} onChange={(e) => setFilterStart(e.target.value)} /><span>até</span><input type="date" className="border rounded-md p-1 bg-white dark:bg-slate-900 dark:[color-scheme:dark]" value={filterEnd} onChange={(e) => setFilterEnd(e.target.value)} /></div>
+                {(filterStart || filterEnd) && <button onClick={() => { setFilterStart(''); setFilterEnd(''); }} className="text-blue-600 hover:underline">Limpar</button>}
               </div>
 
               {activeTab === 'sugestoes' && (
                 <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden relative">
                   {userPlan !== 'premium' && (
-                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[4px] p-4">
-                      <div className="bg-white dark:bg-slate-800 p-6 sm:p-8 rounded-2xl shadow-2xl text-center max-w-sm w-full border-2 border-yellow-400 dark:border-yellow-600 transform transition-all hover:scale-105">
-                        <div className="mx-auto w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-yellow-300 to-yellow-500 text-white rounded-full flex items-center justify-center mb-4 shadow-lg"><Crown size={24} className="sm:w-8 sm:h-8" /></div>
-                        <h3 className="text-lg sm:text-xl font-extrabold mb-2 text-slate-800 dark:text-white">Inteligência Bloqueada</h3>
-                        <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas com a exportação de um clique.</p>
-                        <button onClick={() => setShowPricingModal(true)} className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition w-full flex items-center justify-center gap-2 text-sm sm:text-base">
+                    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/40 dark:bg-slate-900/40 backdrop-blur-[4px]">
+                      <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl text-center max-w-sm border-2 border-yellow-400 dark:border-yellow-600 m-4 transform transition-all hover:scale-105">
+                        <div className="mx-auto w-16 h-16 bg-gradient-to-br from-yellow-300 to-yellow-500 text-white rounded-full flex items-center justify-center mb-4 shadow-lg"><Crown size={32} /></div>
+                        <h3 className="text-xl font-extrabold mb-2 text-slate-800 dark:text-white">Inteligência Bloqueada</h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">Assine o plano <strong>ConciliaPro Premium</strong> para ver exatamente o que deve ser Lançado e Removido, e poupe horas com a exportação de um clique.</p>
+                        <button onClick={() => setShowPricingModal(true)} className="bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition w-full flex items-center justify-center gap-2">
                           <Lock size={18} /> Desbloquear Sugestões
                         </button>
                       </div>
                     </div>
                   )}
                   <div className={userPlan !== 'premium' ? 'filter blur-[5px] select-none pointer-events-none opacity-40' : ''}>
-                    <div className="bg-slate-50 dark:bg-slate-800/50 p-3 sm:p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2 text-sm sm:text-base"><ListChecks size={18} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold whitespace-nowrap">{sugestoesList.length} itens</span></div>
+                    <div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b dark:border-slate-700 flex justify-between"><h3 className="font-bold flex items-center gap-2"><ListChecks size={20} /> Ações Necessárias</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{sugestoesList.length} itens</span></div>
                     <div className="overflow-x-auto max-h-[500px]">
-                      <table className="w-full text-xs sm:text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Ação" sortKey="action" /><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
-                        {sugestoesList.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-2 sm:p-3">{item.action === 'Lançar' ? <span className="bg-green-100 text-green-800 font-bold px-1 sm:px-2 py-1 rounded text-[10px] sm:text-xs flex w-max gap-1 items-center"><ArrowRight size={12}/> Lançar</span> : <span className="bg-red-100 text-red-800 font-bold px-1 sm:px-2 py-1 rounded text-[10px] sm:text-xs flex w-max gap-1 items-center"><XCircle size={12}/> Remover</span>}</td><td className="p-2 sm:p-3 whitespace-nowrap">{item.date}</td><td className="p-2 sm:p-3 min-w-[120px]">{item.desc}</td><td className={`p-2 sm:p-3 text-right font-medium whitespace-nowrap ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
+                      <table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Ação" sortKey="action" /><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
+                        {sugestoesList.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-3">{item.action === 'Lançar' ? <span className="bg-green-100 text-green-800 font-bold px-2 py-1 rounded text-xs flex w-max gap-1"><ArrowRight size={14}/> Lançar</span> : <span className="bg-red-100 text-red-800 font-bold px-2 py-1 rounded text-xs flex w-max gap-1"><XCircle size={14}/> Remover</span>}</td><td className="p-3 whitespace-nowrap">{item.date}</td><td className="p-3">{item.desc}</td><td className={`p-3 text-right font-medium ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
                       </tbody></table>
                     </div>
                   </div>
@@ -742,12 +743,12 @@ function ConciliaProApp() {
               )}
 
               {activeTab === 'pendencia' && (
-                <div className="space-y-6 sm:space-y-8">
-                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-red-50 dark:bg-red-900/20 p-3 sm:p-4 border-b flex justify-between items-center"><h3 className="text-red-800 font-bold flex gap-2 items-center text-sm sm:text-base"><AlertCircle size={18} /> Falta no Sistema</h3><span className="bg-red-200 text-red-800 px-2 py-1 rounded-full text-[10px] sm:text-xs font-bold whitespace-nowrap">{displayBankOnly.length} itens</span></div><div className="overflow-x-auto max-h-[400px] custom-scrollbar"><table className="w-full text-xs sm:text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico do Banco" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
-                    {displayBankOnly.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-2 sm:p-3 whitespace-nowrap">{item.date}</td><td className="p-2 sm:p-3 min-w-[120px]">{item.desc}</td><td className={`p-2 sm:p-3 text-right font-medium whitespace-nowrap ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
+                <div className="space-y-8">
+                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-red-50 dark:bg-red-900/20 p-4 border-b flex justify-between"><h3 className="text-red-800 font-bold flex gap-2"><AlertCircle size={20} /> Falta no Sistema</h3><span className="bg-red-200 text-red-800 px-2 py-1 rounded-full text-xs font-bold">{displayBankOnly.length} itens</span></div><div className="overflow-x-auto max-h-[400px]"><table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico do Banco" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
+                    {displayBankOnly.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-3 whitespace-nowrap">{item.date}</td><td className="p-3">{item.desc}</td><td className={`p-3 text-right font-medium ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
                   </tbody></table></div></div>
-                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-orange-50 dark:bg-orange-900/20 p-3 sm:p-4 border-b flex justify-between items-center"><h3 className="text-orange-800 font-bold flex gap-2 items-center text-sm sm:text-base"><XCircle size={18} /> Sobra no Sistema</h3><span className="bg-orange-200 text-orange-800 px-2 py-1 rounded-full text-[10px] sm:text-xs font-bold whitespace-nowrap">{displaySysOnly.length} itens</span></div><div className="overflow-x-auto max-h-[400px] custom-scrollbar"><table className="w-full text-xs sm:text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico do Sistema" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
-                    {displaySysOnly.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-2 sm:p-3 whitespace-nowrap">{item.date}</td><td className="p-2 sm:p-3 min-w-[120px]">{item.desc}</td><td className={`p-2 sm:p-3 text-right font-medium whitespace-nowrap ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
+                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-orange-50 dark:bg-orange-900/20 p-4 border-b flex justify-between"><h3 className="text-orange-800 font-bold flex gap-2"><XCircle size={20} /> Sobra no Sistema</h3><span className="bg-orange-200 text-orange-800 px-2 py-1 rounded-full text-xs font-bold">{displaySysOnly.length} itens</span></div><div className="overflow-x-auto max-h-[400px]"><table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico do Sistema" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
+                    {displaySysOnly.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-3 whitespace-nowrap">{item.date}</td><td className="p-3">{item.desc}</td><td className={`p-3 text-right font-medium ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
                   </tbody></table></div></div>
                 </div>
               )}
@@ -757,15 +758,15 @@ function ConciliaProApp() {
                 const dataList = isBank ? displayAllBank : displayAllSys;
                 const Icon = isBank ? Landmark : Monitor;
                 return (
-                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-slate-50 dark:bg-slate-800/50 p-3 sm:p-4 border-b flex justify-between items-center"><h3 className="font-bold flex gap-2 items-center text-sm sm:text-base"><Icon size={18} /> Todos do {isBank ? 'Banco' : 'Sistema'}</h3><span className="bg-blue-100 text-blue-800 px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold whitespace-nowrap">{dataList.length} itens</span></div><div className="overflow-x-auto max-h-[500px] custom-scrollbar"><table className="w-full text-xs sm:text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico Original" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
-                    {dataList.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-2 sm:p-3 whitespace-nowrap">{item.date}</td><td className="p-2 sm:p-3 min-w-[120px]">{item.desc}</td><td className={`p-2 sm:p-3 text-right font-medium whitespace-nowrap ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
+                  <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border dark:border-slate-700 overflow-hidden"><div className="bg-slate-50 dark:bg-slate-800/50 p-4 border-b flex justify-between"><h3 className="font-bold flex gap-2"><Icon size={20} /> Todos os Lançamentos do {isBank ? 'Banco' : 'Sistema'}</h3><span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold">{dataList.length} itens</span></div><div className="overflow-x-auto max-h-[500px]"><table className="w-full text-sm text-left"><thead className="bg-white dark:bg-slate-800 border-b sticky top-0 z-10"><tr><SortableTh label="Data" sortKey="date" /><SortableTh label="Histórico Original" sortKey="desc" /><SortableTh label="Valor" sortKey="value" align="right" /></tr></thead><tbody>
+                    {dataList.map(item => (<tr key={item._id} className="border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"><td className="p-3 whitespace-nowrap">{item.date}</td><td className="p-3">{item.desc}</td><td className={`p-3 text-right font-medium ${item.value < 0 ? 'text-red-500' : 'text-blue-500'}`}>{formatMoney(item.value)}</td></tr>))}
                   </tbody></table></div></div>
                 )
               })()}
 
-              <div className="mt-8 text-center flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
-                <button onClick={resetApp} className="w-full sm:w-auto bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-100 font-bold py-3 px-8 rounded-lg">Encerrar e Iniciar Nova</button>
-                <button onClick={exportToExcel} className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg flex items-center justify-center gap-2"><Download size={20} /> Exportar</button>
+              <div className="mt-8 text-center flex flex-wrap justify-center gap-4">
+                <button onClick={resetApp} className="bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-100 font-bold py-3 px-8 rounded-lg">Encerrar e Iniciar Nova</button>
+                <button onClick={exportToExcel} className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2"><Download size={20} /> Exportar</button>
               </div>
             </div>
           )}
@@ -773,44 +774,44 @@ function ConciliaProApp() {
 
         {/* === MODAIS GLOBAIS === */}
         {showPricingModal && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative border border-slate-200 dark:border-slate-800 my-4">
-              <button onClick={() => setShowPricingModal(false)} className="absolute top-2 sm:top-4 right-2 sm:right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-full p-1 z-10"><XCircle size={24} /></button>
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden relative border border-slate-200 dark:border-slate-800">
+              <button onClick={() => setShowPricingModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 rounded-full p-1"><XCircle size={24} /></button>
               
-              <div className="text-center pt-8 sm:pt-10 pb-4 sm:pb-6 px-4 sm:px-6">
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mb-2">Escolha o seu plano</h2>
-                <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 max-w-lg mx-auto">A conciliação manual consome horas do seu dia. Deixe a nossa inteligência trabalhar por si.</p>
+              <div className="text-center pt-10 pb-6 px-6">
+                <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white mb-2">Escolha o seu plano</h2>
+                <p className="text-slate-500 dark:text-slate-400 max-w-lg mx-auto">A conciliação manual consome horas do seu dia. Deixe a nossa inteligência trabalhar por si.</p>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-4 sm:gap-6 p-4 sm:p-6 lg:p-10 bg-slate-50 dark:bg-slate-900">
-                <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 sm:p-6 border border-slate-200 dark:border-slate-700 flex flex-col h-full shadow-sm hover:shadow-md transition">
+              <div className="grid md:grid-cols-2 gap-6 p-6 lg:p-10 bg-slate-50 dark:bg-slate-900">
+                <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 flex flex-col h-full shadow-sm hover:shadow-md transition">
                   <div className="flex-1">
-                    <h3 className="text-lg sm:text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><CreditCard size={18} className="text-slate-500" /> Passe Avulso</h3>
-                    <div className="mb-3 sm:mb-4"><span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white">R$ 1,99</span><span className="text-slate-500 dark:text-slate-400">/uso</span></div>
-                    <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mb-4 sm:mb-6">Ideal para quem faz conciliações raramente e quer apenas descobrir os furos de caixa.</p>
-                    <ul className="space-y-2 sm:space-y-3 mb-6 sm:mb-8 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
-                      <li className="flex gap-2"><CheckCircle size={16} className="text-green-500 flex-shrink-0" /> Permite +1 Conciliação no sistema</li>
-                      <li className="flex gap-2"><CheckCircle size={16} className="text-green-500 flex-shrink-0" /> Mostra totais e diferenças</li>
-                      <li className="flex gap-2 opacity-50"><XCircle size={16} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Abas de Sugestões Automáticas</span></li>
-                      <li className="flex gap-2 opacity-50"><XCircle size={16} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><CreditCard size={20} className="text-slate-500" /> Passe Avulso</h3>
+                    <div className="mb-4"><span className="text-4xl font-extrabold text-slate-900 dark:text-white">R$ 1,99</span><span className="text-slate-500 dark:text-slate-400">/uso</span></div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Ideal para quem faz conciliações raramente e quer apenas descobrir os furos de caixa.</p>
+                    <ul className="space-y-3 mb-8 text-sm text-slate-600 dark:text-slate-300">
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Permite +1 Conciliação no sistema</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-green-500 flex-shrink-0" /> Mostra totais e diferenças</li>
+                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Abas de Sugestões Automáticas</span></li>
+                      <li className="flex gap-2 opacity-50"><XCircle size={18} className="text-slate-400 flex-shrink-0" /> <span className="line-through">Exportar Sugestões para Excel</span></li>
                     </ul>
                   </div>
-                  <button onClick={() => handleStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition text-sm sm:text-base">Comprar 1 Acesso</button>
+                  <button onClick={() => handleStripePayment('avulso')} className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-bold transition">Comprar 1 Acesso</button>
                 </div>
-                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-5 sm:p-6 border-2 border-blue-500 flex flex-col h-full shadow-xl relative transform md:-translate-y-2 mt-4 md:mt-0">
-                  <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-full flex items-center gap-1 whitespace-nowrap"><Crown size={10} /> Mais Popular</div>
-                  <div className="flex-1 mt-2">
-                    <h3 className="text-lg sm:text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><Zap size={18} className="text-yellow-500" /> Assinatura Premium</h3>
-                    <div className="mb-3 sm:mb-4"><span className="text-3xl sm:text-4xl font-extrabold text-blue-600 dark:text-blue-400">R$ 49,90</span><span className="text-slate-500 dark:text-slate-400">/mês</span></div>
-                    <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mb-4 sm:mb-6">Para profissionais e escritórios que precisam de produtividade máxima e relatórios instantâneos.</p>
-                    <ul className="space-y-2 sm:space-y-3 mb-6 sm:mb-8 text-xs sm:text-sm text-slate-800 dark:text-slate-200 font-medium">
-                      <li className="flex gap-2"><CheckCircle size={16} className="text-blue-500 flex-shrink-0" /> Conciliações Ilimitadas</li>
-                      <li className="flex gap-2"><CheckCircle size={16} className="text-blue-500 flex-shrink-0" /> Histórico salvo na nuvem</li>
-                      <li className="flex gap-2"><CheckCircle size={16} className="text-blue-500 flex-shrink-0" /> Desbloqueio da "Inteligência de Sugestões"</li>
-                      <li className="flex gap-2"><CheckCircle size={16} className="text-blue-500 flex-shrink-0" /> Exportação para Excel (Um clique)</li>
+                <div className="bg-gradient-to-b from-blue-50 to-white dark:from-slate-800 dark:to-slate-800 rounded-2xl p-6 border-2 border-blue-50 flex flex-col h-full shadow-xl relative transform md:-translate-y-2">
+                  <div className="absolute top-0 right-1/2 translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-full flex items-center gap-1"><Crown size={12} /> Mais Popular</div>
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2 flex items-center gap-2"><Zap size={20} className="text-yellow-500" /> Assinatura Premium</h3>
+                    <div className="mb-4"><span className="text-4xl font-extrabold text-blue-600 dark:text-blue-400">R$ 49,90</span><span className="text-slate-500 dark:text-slate-400">/mês</span></div>
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">Para profissionais e escritórios que precisam de produtividade máxima e relatórios instantâneos.</p>
+                    <ul className="space-y-3 mb-8 text-sm text-slate-800 dark:text-slate-200 font-medium">
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Conciliações Ilimitadas</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Histórico salvo na nuvem</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Desbloqueio da "Inteligência de Sugestões"</li>
+                      <li className="flex gap-2"><CheckCircle size={18} className="text-blue-500 flex-shrink-0" /> Exportação para Excel (Um clique)</li>
                     </ul>
                   </div>
-                  <button onClick={() => handleStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg text-sm sm:text-base">Assinar Premium</button>
+                  <button onClick={() => handleStripePayment('premium')} className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg">Assinar Premium</button>
                 </div>
               </div>
             </div>
@@ -819,28 +820,28 @@ function ConciliaProApp() {
 
         {/* Modal de Autenticação */}
         {showAuthWall && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 p-6 sm:p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full relative">
               <button onClick={() => setShowAuthWall(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><XCircle size={24} /></button>
-              <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4"><Lock size={24} className="sm:w-8 sm:h-8" /></div>
-              <h2 className="text-xl sm:text-2xl font-bold text-center mb-2 dark:text-white">{authMode === 'register' ? 'Crie a sua Conta' : 'Bem-vindo de volta!'}</h2>
-              <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-xs sm:text-sm">{authMode === 'register' ? 'Para ganhar 5 conciliações gratuitas e guardar os relatórios, crie uma conta.' : 'Faça login para continuar as suas conciliações.'}</p>
+              <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4"><Lock size={32} /></div>
+              <h2 className="text-2xl font-bold text-center mb-2 dark:text-white">{authMode === 'register' ? 'Crie a sua Conta' : 'Bem-vindo de volta!'}</h2>
+              <p className="text-center text-slate-500 dark:text-slate-400 mb-6 text-sm">{authMode === 'register' ? 'Para ganhar 5 conciliações gratuitas e guardar os relatórios, crie uma conta.' : 'Faça login para continuar as suas conciliações.'}</p>
 
-              {authSuccessMsg && <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-xs sm:text-sm rounded-lg border border-green-200 dark:border-green-800/50 flex justify-center items-center font-bold gap-2 text-center"><CheckCircle size={16} className="flex-shrink-0"/> <span>{authSuccessMsg}</span></div>}
-              {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs sm:text-sm rounded-lg border border-red-200 dark:border-red-800/50">{authError}</div>}
+              {authSuccessMsg && <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm rounded-lg border border-green-200 dark:border-green-800/50 flex justify-center items-center font-bold gap-2 text-center"><CheckCircle size={18} className="flex-shrink-0"/> <span>{authSuccessMsg}</span></div>}
+              {authError && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm rounded-lg border border-red-200 dark:border-red-800/50">{authError}</div>}
 
               <form onSubmit={handleAuthSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">E-mail</label>
-                  <div className="relative"><Mail size={16} className="absolute left-3 top-3.5 text-slate-400" /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={authLoading} className="w-full pl-9 pr-3 py-2 sm:py-3 text-sm border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50" placeholder="seu@email.com" /></div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">E-mail</label>
+                  <div className="relative"><Mail size={18} className="absolute left-3 top-3 text-slate-400" /><input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={authLoading} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50" placeholder="seu@email.com" /></div>
                 </div>
                 <div>
-                  <label className="block text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Senha</label>
-                  <div className="relative"><Key size={16} className="absolute left-3 top-3.5 text-slate-400" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={authLoading} className="w-full pl-9 pr-3 py-2 sm:py-3 text-sm border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50" placeholder="••••••••" /></div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase mb-1">Senha</label>
+                  <div className="relative"><Key size={18} className="absolute left-3 top-3 text-slate-400" /><input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={authLoading} className="w-full pl-10 pr-3 py-2 border dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 outline-none transition disabled:opacity-50" placeholder="••••••••" /></div>
                 </div>
-                <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 rounded-lg shadow-md transition mt-2 text-sm sm:text-base">{authLoading ? 'A processar...' : (authMode === 'register' ? 'Criar Conta e Continuar' : 'Entrar')}</button>
+                <button type="submit" disabled={authLoading} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold py-3 rounded-lg shadow-md transition mt-2">{authLoading ? 'A processar...' : (authMode === 'register' ? 'Criar Conta e Continuar' : 'Entrar')}</button>
               </form>
-              <div className="mt-6 text-center text-xs sm:text-sm"><span className="text-slate-500 dark:text-slate-400">{authMode === 'register' ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span> <button onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')} className="text-blue-600 dark:text-blue-400 font-bold hover:underline">{authMode === 'register' ? 'Faça Login' : 'Criar Conta'}</button></div>
+              <div className="mt-6 text-center text-sm"><span className="text-slate-500 dark:text-slate-400">{authMode === 'register' ? 'Já tem uma conta?' : 'Ainda não tem conta?'}</span> <button onClick={() => setAuthMode(authMode === 'register' ? 'login' : 'register')} className="text-blue-600 dark:text-blue-400 font-bold hover:underline">{authMode === 'register' ? 'Faça Login' : 'Criar Conta'}</button></div>
             </div>
           </div>
         )}
@@ -849,10 +850,6 @@ function ConciliaProApp() {
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
-        .custom-scrollbar::-webkit-scrollbar { height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #475569; }
       `}} />
     </div>
   );
@@ -864,11 +861,11 @@ export default class AppErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '20px', fontFamily: 'sans-serif', background: '#fee2e2', color: '#991b1b', minHeight: '100vh' }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '10px' }}>⚠️ Ups! Houve um erro de digitação.</h1>
-          <p style={{fontSize: '14px'}}>A tela ficou branca porque ocorreu um erro ao ler o código.</p>
-          <pre style={{ background: '#7f1d1d', color: 'white', padding: '15px', borderRadius: '8px', marginTop: '20px', overflowX: 'auto', fontSize: '12px' }}>{this.state.erroMsg}</pre>
-          <p style={{ marginTop: '20px', fontSize: '14px' }}><strong>Como resolver:</strong> Copie novamente TODO o código do chat e substitua completamente no ficheiro <code>App.jsx</code>.</p>
+        <div style={{ padding: '40px', fontFamily: 'sans-serif', background: '#fee2e2', color: '#991b1b', minHeight: '100vh' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>⚠️ Ups! Houve um erro de digitação.</h1>
+          <p>A tela ficou branca porque ocorreu um erro ao ler o código.</p>
+          <pre style={{ background: '#7f1d1d', color: 'white', padding: '15px', borderRadius: '8px', marginTop: '20px', overflowX: 'auto' }}>{this.state.erroMsg}</pre>
+          <p style={{ marginTop: '20px' }}><strong>Como resolver:</strong> Copie novamente TODO o código do chat e substitua completamente no ficheiro <code>App.jsx</code>.</p>
         </div>
       );
     }
